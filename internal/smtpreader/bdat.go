@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/uponusolutions/go-smtp"
+	"github.com/uponusolutions/deltasmtp"
 )
 
 type bdat struct {

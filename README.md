@@ -1,31 +1,31 @@
-# go-smtp
+# deltasmtp
 
-[![coverage](https://raw.githubusercontent.com/uponusolutions/go-smtp/badges/.badges/main/coverage.svg)](https://uponusolutions.github.io/go-smtp/coverage/)
-[![reference](https://pkg.go.dev/badge/github.com/uponusolutions/go-smtp.svg)](https://pkg.go.dev/github.com/uponusolutions/go-smtp)
+[![coverage](https://raw.githubusercontent.com/uponusolutions/deltasmtp/badges/.badges/main/coverage.svg)](https://uponusolutions.github.io/deltasmtp/coverage/)
+[![reference](https://pkg.go.dev/badge/github.com/uponusolutions/deltasmtp.svg)](https://pkg.go.dev/github.com/uponusolutions/deltasmtp)
 
 An ESMTP client and server library written in Go.
 
-It is a fork of [emersion/go-smtp](https://github.com/emersion/go-smtp) with a
-reworked, context-aware API, a high-level mailer that resolves MX records and
+It started as a fork of [emersion/go-smtp](https://github.com/emersion/go-smtp)
+and has since been detached from it. It adds a reworked, context-aware API, a high-level mailer that resolves MX records and
 reports per-recipient results, and support for extensions such as CHUNKING/BDAT,
 DELIVERBY, MT-PRIORITY, RRVS and XOORG. Both client and server speak PIPELINING.
 
 ```sh
-go get github.com/uponusolutions/go-smtp
+go get github.com/uponusolutions/deltasmtp
 ```
 
 ## Packages
 
 | Package | Description |
 | --- | --- |
-| [`smtp`](https://pkg.go.dev/github.com/uponusolutions/go-smtp) | Shared definitions: `Status`, `MailOptions`, `RcptOptions`, BATV/SRS sender parsing |
-| [`mailer`](https://pkg.go.dev/github.com/uponusolutions/go-smtp/mailer) | High-level client: connection reuse, security, auth, sending to many servers |
-| [`client`](https://pkg.go.dev/github.com/uponusolutions/go-smtp/client) | Low-level client, one method per SMTP command |
-| [`server`](https://pkg.go.dev/github.com/uponusolutions/go-smtp/server) | SMTP server built around a `Backend`/`Session` pair |
-| [`resolve`](https://pkg.go.dev/github.com/uponusolutions/go-smtp/resolve) | MX lookup that groups recipients by target server |
-| [`tester`](https://pkg.go.dev/github.com/uponusolutions/go-smtp/tester) | Test utilities: fake connections, certificates, in-memory server |
+| [`smtp`](https://pkg.go.dev/github.com/uponusolutions/deltasmtp) | Shared definitions: `Status`, `MailOptions`, `RcptOptions`, BATV/SRS sender parsing |
+| [`mailer`](https://pkg.go.dev/github.com/uponusolutions/deltasmtp/mailer) | High-level client: connection reuse, security, auth, sending to many servers |
+| [`client`](https://pkg.go.dev/github.com/uponusolutions/deltasmtp/client) | Low-level client, one method per SMTP command |
+| [`server`](https://pkg.go.dev/github.com/uponusolutions/deltasmtp/server) | SMTP server built around a `Backend`/`Session` pair |
+| [`resolve`](https://pkg.go.dev/github.com/uponusolutions/deltasmtp/resolve) | MX lookup that groups recipients by target server |
+| [`tester`](https://pkg.go.dev/github.com/uponusolutions/deltasmtp/tester) | Test utilities: fake connections, certificates, in-memory server |
 
-See [examples](https://github.com/uponusolutions/go-smtp/tree/main/examples) for
+See [examples](https://github.com/uponusolutions/deltasmtp/tree/main/examples) for
 runnable programs.
 
 ## Sending mail
@@ -176,8 +176,8 @@ how messages of unknown size are coalesced into chunks. Pipelining removes a rou
 and the server.
 
 Benchmarks run in CI and are published on the
-[benchmark page](https://uponusolutions.github.io/go-smtp/dev/bench/); coverage
-is on the [coverage page](https://uponusolutions.github.io/go-smtp/coverage/).
+[benchmark page](https://uponusolutions.github.io/deltasmtp/dev/bench/); coverage
+is on the [coverage page](https://uponusolutions.github.io/deltasmtp/coverage/).
 
 ## Differences from emersion/go-smtp
 
@@ -200,15 +200,15 @@ The API is not compatible with upstream. The notable changes:
 - **Pipelining on both sides**, opt-in for the client.
 - **The mailer**, which resolves MX records, sends to several servers per call
   and reports per-recipient failures.
-- **No LMTP.** Upstream supports LMTP; this fork does not.
+- **No LMTP.** Upstream supports LMTP; deltasmtp does not.
 
 If you need a very stable API or LMTP, use upstream. It is a well-maintained
-library and this fork exists only because we needed a different set of tradeoffs.
+library and deltasmtp exists only because we needed a different set of tradeoffs.
 
 ## Relationship with net/smtp
 
 The Go standard library provides an SMTP client implementation in `net/smtp`.
-However `net/smtp` is frozen: it's not getting any new features. go-smtp provides
+However `net/smtp` is frozen: it's not getting any new features. deltasmtp provides
 a server implementation and a number of client improvements.
 
 ## Development

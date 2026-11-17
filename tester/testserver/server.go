@@ -16,10 +16,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/uponusolutions/deltasmtp"
+	"github.com/uponusolutions/deltasmtp/server"
+	"github.com/uponusolutions/deltasmtp/tester"
 	"github.com/uponusolutions/go-sasl"
-	"github.com/uponusolutions/go-smtp"
-	"github.com/uponusolutions/go-smtp/server"
-	"github.com/uponusolutions/go-smtp/tester"
 )
 
 // Standard returns a standard SMTP server listening on a random Port.

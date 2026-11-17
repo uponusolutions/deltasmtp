@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/uponusolutions/go-smtp"
-	"github.com/uponusolutions/go-smtp/internal/parse"
+	"github.com/uponusolutions/deltasmtp"
+	"github.com/uponusolutions/deltasmtp/internal/parse"
 )
 
 // Parses the BY argument defined in RFC2852 section 4.

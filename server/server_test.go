@@ -18,9 +18,9 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/uponusolutions/deltasmtp"
+	"github.com/uponusolutions/deltasmtp/server"
 	"github.com/uponusolutions/go-sasl"
-	"github.com/uponusolutions/go-smtp"
-	"github.com/uponusolutions/go-smtp/server"
 )
 
 type message struct {

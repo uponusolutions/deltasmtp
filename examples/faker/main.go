@@ -10,7 +10,7 @@ import (
 	"os"
 	"os/signal"
 
-	"github.com/uponusolutions/go-smtp/tester/testserver"
+	"github.com/uponusolutions/deltasmtp/tester/testserver"
 )
 
 func main() {

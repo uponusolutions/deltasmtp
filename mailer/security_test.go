@@ -6,8 +6,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/uponusolutions/deltasmtp/tester"
 	"github.com/uponusolutions/go-sasl"
-	"github.com/uponusolutions/go-smtp/tester"
 )
 
 // fakeStartTLSServer advertises STARTTLS and AUTH and answers STARTTLS with h.

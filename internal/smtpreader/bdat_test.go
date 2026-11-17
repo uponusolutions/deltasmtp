@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/uponusolutions/go-smtp"
+	"github.com/uponusolutions/deltasmtp"
 )
 
 func TestBdatReaderArgErrors(t *testing.T) {

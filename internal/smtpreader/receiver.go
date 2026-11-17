@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/uponusolutions/go-smtp"
+	"github.com/uponusolutions/deltasmtp"
 )
 
 // ErrTooManyResponseLines is returned if a response exceeds the maximum response lines.

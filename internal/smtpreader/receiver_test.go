@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/uponusolutions/go-smtp"
-	"github.com/uponusolutions/go-smtp/tester"
+	"github.com/uponusolutions/deltasmtp"
+	"github.com/uponusolutions/deltasmtp/tester"
 )
 
 func reader(in string, out *bytes.Buffer) *Receiver {

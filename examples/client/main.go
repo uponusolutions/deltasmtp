@@ -11,7 +11,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/uponusolutions/go-smtp/mailer"
+	"github.com/uponusolutions/deltasmtp/mailer"
 )
 
 //go:embed testdata/example.eml

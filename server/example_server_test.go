@@ -9,9 +9,9 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/uponusolutions/deltasmtp"
+	"github.com/uponusolutions/deltasmtp/server"
 	"github.com/uponusolutions/go-sasl"
-	"github.com/uponusolutions/go-smtp"
-	"github.com/uponusolutions/go-smtp/server"
 )
 
 // The Backend implements SMTP server methods.

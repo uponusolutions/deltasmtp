@@ -7,7 +7,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/uponusolutions/go-smtp"
+	"github.com/uponusolutions/deltasmtp"
 )
 
 // CutPrefixFold is a version of strings.CutPrefix which is case-insensitive.

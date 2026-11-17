@@ -12,10 +12,10 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"github.com/uponusolutions/go-smtp"
-	"github.com/uponusolutions/go-smtp/internal/smtpreader"
-	"github.com/uponusolutions/go-smtp/tester"
-	"github.com/uponusolutions/go-smtp/tester/upstream"
+	"github.com/uponusolutions/deltasmtp"
+	"github.com/uponusolutions/deltasmtp/internal/smtpreader"
+	"github.com/uponusolutions/deltasmtp/tester"
+	"github.com/uponusolutions/deltasmtp/tester/upstream"
 )
 
 //go:embed testdata/*

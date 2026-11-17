@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/uponusolutions/go-smtp/internal/smtpwriter"
+	"github.com/uponusolutions/deltasmtp/internal/smtpwriter"
 )
 
 func TestBdatWriterWithoutSize(t *testing.T) {

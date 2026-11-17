@@ -6,9 +6,9 @@ import (
 	"log"
 	"strings"
 
+	"github.com/uponusolutions/deltasmtp/client"
+	"github.com/uponusolutions/deltasmtp/mailer"
 	"github.com/uponusolutions/go-sasl"
-	"github.com/uponusolutions/go-smtp/client"
-	"github.com/uponusolutions/go-smtp/mailer"
 )
 
 func ExampleDial() {

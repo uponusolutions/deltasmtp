@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/uponusolutions/go-smtp/server"
+	"github.com/uponusolutions/deltasmtp/server"
 )
 
 // The server always propagates that it is supporting pipelining.

@@ -5,7 +5,7 @@ import (
 	"bytes"
 	"io"
 
-	"github.com/uponusolutions/go-smtp"
+	"github.com/uponusolutions/deltasmtp"
 )
 
 type dot struct {

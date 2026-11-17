@@ -8,9 +8,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/uponusolutions/go-smtp"
-	"github.com/uponusolutions/go-smtp/client"
-	"github.com/uponusolutions/go-smtp/tester"
+	"github.com/uponusolutions/deltasmtp"
+	"github.com/uponusolutions/deltasmtp/client"
+	"github.com/uponusolutions/deltasmtp/tester"
 )
 
 // newStrictServer returns a tester.FakeServer that, like Postfix, refuses a MAIL

@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"io"
 
-	"github.com/uponusolutions/go-smtp"
+	"github.com/uponusolutions/deltasmtp"
 )
 
 // Copied and integrated over from

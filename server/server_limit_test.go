@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"github.com/uponusolutions/go-smtp"
-	"github.com/uponusolutions/go-smtp/server"
+	"github.com/uponusolutions/deltasmtp"
+	"github.com/uponusolutions/deltasmtp/server"
 )
 
 // When the maximum message size is exceeded during DATA or BDAT the rest of the

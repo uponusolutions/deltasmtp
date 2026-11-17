@@ -3,7 +3,7 @@ package server
 import (
 	"fmt"
 
-	"github.com/uponusolutions/go-smtp/internal/parse"
+	"github.com/uponusolutions/deltasmtp/internal/parse"
 )
 
 // UTF8Clean is an address validator for WithAddressValidator which rejects

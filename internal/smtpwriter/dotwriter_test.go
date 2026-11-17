@@ -13,8 +13,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/uponusolutions/go-smtp/internal/smtpwriter"
-	"github.com/uponusolutions/go-smtp/tester"
+	"github.com/uponusolutions/deltasmtp/internal/smtpwriter"
+	"github.com/uponusolutions/deltasmtp/tester"
 )
 
 //go:embed testdata/*

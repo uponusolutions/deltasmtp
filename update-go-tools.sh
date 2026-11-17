@@ -10,7 +10,7 @@ cd $(dirname "$0")
 
 mkdir -p tmp
 cd tmp
-echo "module github.com/uponusolutions/go-smtp" > go.mod
+echo "module github.com/uponusolutions/deltasmtp" > go.mod
 
 # install tool
 go get -tool github.com/golangci/golangci-lint/v2/cmd/golangci-lint

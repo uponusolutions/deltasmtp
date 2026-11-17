@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/uponusolutions/go-smtp/mailer"
+	"github.com/uponusolutions/deltasmtp/mailer"
 )
 
 func TestClient_Multireader(t *testing.T) {

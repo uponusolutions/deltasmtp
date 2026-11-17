@@ -15,14 +15,14 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/uponusolutions/go-smtp"
-	"github.com/uponusolutions/go-smtp/server"
-	"github.com/uponusolutions/go-smtp/tester"
-	"github.com/uponusolutions/go-smtp/tester/testserver"
+	"github.com/uponusolutions/deltasmtp"
+	"github.com/uponusolutions/deltasmtp/server"
+	"github.com/uponusolutions/deltasmtp/tester"
+	"github.com/uponusolutions/deltasmtp/tester/testserver"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/uponusolutions/go-smtp/client"
+	"github.com/uponusolutions/deltasmtp/client"
 )
 
 // backend rejects every recipient whose local part starts with "notfound",

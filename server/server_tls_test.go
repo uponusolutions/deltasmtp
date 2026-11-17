@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/uponusolutions/go-smtp/server"
-	"github.com/uponusolutions/go-smtp/tester"
+	"github.com/uponusolutions/deltasmtp/server"
+	"github.com/uponusolutions/deltasmtp/tester"
 )
 
 func TestServerEnforceSecureConnection(t *testing.T) {

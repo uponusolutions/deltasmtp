@@ -1,4 +1,4 @@
-module github.com/uponusolutions/go-smtp
+module github.com/uponusolutions/deltasmtp
 
 require (
 	github.com/stretchr/testify v1.12.1

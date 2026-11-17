@@ -6,8 +6,8 @@ import (
 	"io"
 	"log/slog"
 
+	"github.com/uponusolutions/deltasmtp"
 	"github.com/uponusolutions/go-sasl"
-	"github.com/uponusolutions/go-smtp"
 )
 
 // Backend is a SMTP server backend.

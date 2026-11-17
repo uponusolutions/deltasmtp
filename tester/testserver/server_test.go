@@ -11,7 +11,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/uponusolutions/go-smtp/tester"
+	"github.com/uponusolutions/deltasmtp/tester"
 )
 
 var srv = Standard()

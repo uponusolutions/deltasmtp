@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/uponusolutions/go-smtp"
+	"github.com/uponusolutions/deltasmtp"
 )
 
 // ErrServerClosed occurs if a server is already closed.

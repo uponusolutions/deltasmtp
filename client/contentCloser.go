@@ -4,8 +4,8 @@ import (
 	"errors"
 	"io"
 
-	"github.com/uponusolutions/go-smtp"
-	"github.com/uponusolutions/go-smtp/internal/deadline"
+	"github.com/uponusolutions/deltasmtp"
+	"github.com/uponusolutions/deltasmtp/internal/deadline"
 )
 
 // ContentCloser writes the message content.

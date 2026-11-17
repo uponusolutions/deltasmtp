@@ -1,4 +1,4 @@
-module github.com/uponusolutions/go-smtp
+module github.com/uponusolutions/deltasmtp
 
 go 1.27.1
 

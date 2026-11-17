@@ -25,10 +25,10 @@ import (
 	"runtime/debug"
 	"time"
 
-	"github.com/uponusolutions/go-smtp"
-	"github.com/uponusolutions/go-smtp/internal/deadline"
-	"github.com/uponusolutions/go-smtp/internal/smtpreader"
-	"github.com/uponusolutions/go-smtp/internal/smtpwriter"
+	"github.com/uponusolutions/deltasmtp"
+	"github.com/uponusolutions/deltasmtp/internal/deadline"
+	"github.com/uponusolutions/deltasmtp/internal/smtpreader"
+	"github.com/uponusolutions/deltasmtp/internal/smtpwriter"
 )
 
 // Serve accepts incoming connections on the Listener l.

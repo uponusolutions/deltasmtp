@@ -14,11 +14,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/uponusolutions/go-smtp"
-	"github.com/uponusolutions/go-smtp/internal/deadline"
-	"github.com/uponusolutions/go-smtp/internal/parse"
-	"github.com/uponusolutions/go-smtp/internal/smtpreader"
-	"github.com/uponusolutions/go-smtp/internal/smtpwriter"
+	"github.com/uponusolutions/deltasmtp"
+	"github.com/uponusolutions/deltasmtp/internal/deadline"
+	"github.com/uponusolutions/deltasmtp/internal/parse"
+	"github.com/uponusolutions/deltasmtp/internal/smtpreader"
+	"github.com/uponusolutions/deltasmtp/internal/smtpwriter"
 )
 
 // errMessageTooLarge is returned by the DATA and BDAT handlers if the message

@@ -9,9 +9,9 @@ import (
 	"net"
 	"slices"
 
-	"github.com/uponusolutions/go-smtp"
-	"github.com/uponusolutions/go-smtp/client"
-	"github.com/uponusolutions/go-smtp/resolve"
+	"github.com/uponusolutions/deltasmtp"
+	"github.com/uponusolutions/deltasmtp/client"
+	"github.com/uponusolutions/deltasmtp/resolve"
 )
 
 // Mailer implements a smtp client with .

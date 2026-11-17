@@ -3,8 +3,8 @@ package mailer
 import (
 	"crypto/tls"
 
+	"github.com/uponusolutions/deltasmtp/client"
 	"github.com/uponusolutions/go-sasl"
-	"github.com/uponusolutions/go-smtp/client"
 )
 
 // DefaultConfig returns the default configuration of a mailer.

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/uponusolutions/go-smtp"
-	"github.com/uponusolutions/go-smtp/internal/smtpreader"
+	"github.com/uponusolutions/deltasmtp"
+	"github.com/uponusolutions/deltasmtp/internal/smtpreader"
 )
 
 type fragmentReader struct {

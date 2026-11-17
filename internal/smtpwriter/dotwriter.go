@@ -12,7 +12,7 @@ import (
 	"bytes"
 	"io"
 
-	"github.com/uponusolutions/go-smtp"
+	"github.com/uponusolutions/deltasmtp"
 )
 
 // NewDot returns a writer that can be used to write a dot-encoding to w.

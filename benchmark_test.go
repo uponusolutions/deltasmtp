@@ -11,12 +11,12 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/uponusolutions/deltasmtp"
+	"github.com/uponusolutions/deltasmtp/client"
+	"github.com/uponusolutions/deltasmtp/mailer"
+	"github.com/uponusolutions/deltasmtp/server"
+	"github.com/uponusolutions/deltasmtp/tester"
 	"github.com/uponusolutions/go-sasl"
-	"github.com/uponusolutions/go-smtp"
-	"github.com/uponusolutions/go-smtp/client"
-	"github.com/uponusolutions/go-smtp/mailer"
-	"github.com/uponusolutions/go-smtp/server"
-	"github.com/uponusolutions/go-smtp/tester"
 )
 
 //go:embed testdata/*

@@ -30,12 +30,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/uponusolutions/deltasmtp"
+	"github.com/uponusolutions/deltasmtp/internal/deadline"
+	"github.com/uponusolutions/deltasmtp/internal/parse"
+	"github.com/uponusolutions/deltasmtp/internal/smtpreader"
+	"github.com/uponusolutions/deltasmtp/internal/smtpwriter"
 	"github.com/uponusolutions/go-sasl"
-	"github.com/uponusolutions/go-smtp"
-	"github.com/uponusolutions/go-smtp/internal/deadline"
-	"github.com/uponusolutions/go-smtp/internal/parse"
-	"github.com/uponusolutions/go-smtp/internal/smtpreader"
-	"github.com/uponusolutions/go-smtp/internal/smtpwriter"
 )
 
 // Client implements a SMTP Client with .
