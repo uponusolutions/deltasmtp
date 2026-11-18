@@ -138,7 +138,7 @@ func TestBdatReader(t *testing.T) {
 			return arg[0:4], arg[5:], nil
 		})
 		_, err = io.ReadAll(reader)
-		require.ErrorIs(t, err, smtp.ErrDataTooLarge)
+		require.ErrorIs(t, err, deltasmtp.ErrDataTooLarge)
 	})
 
 	t.Run("ToFewBytes", func(t *testing.T) {
@@ -161,7 +161,7 @@ func TestBdatReader(t *testing.T) {
 			return arg[0:4], arg[5:], nil
 		})
 		_, err = io.ReadAll(reader)
-		require.ErrorIs(t, err, smtp.ErrConnection)
+		require.ErrorIs(t, err, deltasmtp.ErrConnection)
 	})
 
 	t.Run("NextCommandErrorEOF", func(t *testing.T) {
@@ -179,7 +179,7 @@ func TestBdatReader(t *testing.T) {
 			return "", "", io.EOF
 		})
 		_, err = io.ReadAll(reader)
-		require.ErrorIs(t, smtp.ErrConnection, err)
+		require.ErrorIs(t, deltasmtp.ErrConnection, err)
 	})
 
 	t.Run("NextCommandErrorRandomSmtpError", func(t *testing.T) {
@@ -194,11 +194,11 @@ func TestBdatReader(t *testing.T) {
 		size, last, err := BdatArg(arg[5:])
 		require.NoError(t, err)
 		reader := NewBdat(size, last, 4, readerInput, func() (string, string, error) {
-			return "", "", smtp.ErrAuthFailed
+			return "", "", deltasmtp.ErrAuthFailed
 		})
 		require.NoError(t, err)
 		_, err = io.ReadAll(reader)
-		require.ErrorIs(t, smtp.ErrAuthFailed, err)
+		require.ErrorIs(t, deltasmtp.ErrAuthFailed, err)
 	})
 }
 
@@ -230,13 +230,13 @@ func TestBdatReaderLimitSticky(t *testing.T) {
 			})
 
 			res, err := io.ReadAll(reader)
-			require.ErrorIs(t, err, smtp.ErrDataTooLarge)
+			require.ErrorIs(t, err, deltasmtp.ErrDataTooLarge)
 			require.Equal(t, tc.read, string(res))
 
 			for range 3 {
 				n, err := reader.Read(make([]byte, 10))
 				require.Zero(t, n)
-				require.ErrorIs(t, err, smtp.ErrDataTooLarge)
+				require.ErrorIs(t, err, deltasmtp.ErrDataTooLarge)
 			}
 
 			// the chunk is still pending on the input

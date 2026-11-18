@@ -96,8 +96,8 @@ func (*Backend) NewSession(ctx context.Context, _ *server.Conn) (context.Context
     return ctx, &Session{}, nil
 }
 
-func (s *Session) Mail(ctx context.Context, from string, opts *smtp.MailOptions) error { ... }
-func (s *Session) Rcpt(ctx context.Context, to string, opts *smtp.RcptOptions) error   { ... }
+func (s *Session) Mail(ctx context.Context, from string, opts *deltasmtp.MailOptions) error { ... }
+func (s *Session) Rcpt(ctx context.Context, to string, opts *deltasmtp.RcptOptions) error   { ... }
 
 // Data must consume the reader completely before returning.
 // The returned queue id ends up in the 250 reply as "OK: queued as <id>".
@@ -123,7 +123,7 @@ if err := s.ListenAndServe(ctx); err != nil {
 ```
 
 Errors returned from session methods are sent to the client. Return an
-`*smtp.Status` to control the reply code, enhanced code and (multi-line) text;
+`*deltasmtp.Status` to control the reply code, enhanced code and (multi-line) text;
 any other error becomes a generic failure and is logged through the session
 logger.
 
@@ -194,7 +194,7 @@ The API is not compatible with upstream. The notable changes:
 - **`Session.Data` takes `func() io.Reader`** and returns a queue id, which makes
   it possible to skip reading the body and to report an identifier back to the
   client.
-- **Structured errors and logging.** Replies are `*smtp.Status` values with
+- **Structured errors and logging.** Replies are `*deltasmtp.Status` values with
   multi-line support, and each session can provide its own `*slog.Logger`.
 - **More extensions.** Client CHUNKING/BDAT and XOORG are supported in addition to what upstream offers.
 - **Pipelining on both sides**, opt-in for the client.

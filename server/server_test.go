@@ -26,9 +26,9 @@ import (
 type message struct {
 	From     string
 	To       []string
-	RcptOpts []*smtp.RcptOptions
+	RcptOpts []*deltasmtp.RcptOptions
 	Data     []byte
-	Opts     *smtp.MailOptions
+	Opts     *deltasmtp.MailOptions
 }
 
 type backend struct {
@@ -110,11 +110,11 @@ func (*session) STARTTLS(_ context.Context, tls *tls.Config) (*tls.Config, error
 	return tls, nil
 }
 
-func (*session) Verify(_ context.Context, _ string, _ *smtp.VrfyOptions) error {
+func (*session) Verify(_ context.Context, _ string, _ *deltasmtp.VrfyOptions) error {
 	return nil
 }
 
-func (s *session) Mail(ctx context.Context, from string, opts *smtp.MailOptions) error {
+func (s *session) Mail(ctx context.Context, from string, opts *deltasmtp.MailOptions) error {
 	if s.backend.userErr != nil {
 		return s.backend.userErr
 	}
@@ -127,7 +127,7 @@ func (s *session) Mail(ctx context.Context, from string, opts *smtp.MailOptions)
 	return nil
 }
 
-func (s *session) Rcpt(_ context.Context, to string, opts *smtp.RcptOptions) error {
+func (s *session) Rcpt(_ context.Context, to string, opts *deltasmtp.RcptOptions) error {
 	s.msg.To = append(s.msg.To, to)
 	s.msg.RcptOpts = append(s.msg.RcptOpts, opts)
 	return nil
@@ -1214,7 +1214,7 @@ func TestServer_anonymousUserError(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	be.userErr = smtp.ErrAuthRequired
+	be.userErr = deltasmtp.ErrAuthRequired
 
 	_, _ = io.WriteString(c, "MAIL FROM:<root@nsa.gov>\r\n")
 	scanOk(t, c, scanner)
@@ -1477,7 +1477,7 @@ func TestServer_Chunking_Reset(t *testing.T) {
 		t.Fatal("Invalid BDAT response:", scanner.Text())
 	}
 
-	if err := <-be.dataErrors; err != smtp.Reset {
+	if err := <-be.dataErrors; err != deltasmtp.Reset {
 		t.Fatal("Backend received a different error:", err)
 	}
 
@@ -1534,7 +1534,7 @@ func TestServer_Chunking_Close(t *testing.T) {
 		t.Fatal("Invalid BDAT response:", scanner.Text())
 	}
 
-	if err := <-be.dataErrors; err != smtp.Quit {
+	if err := <-be.dataErrors; err != deltasmtp.Quit {
 		t.Fatal("Backend received a different error:", err)
 	}
 }
@@ -1565,7 +1565,7 @@ func TestServer_Chunking_ClosedInTheMiddle(t *testing.T) {
 	// Bye!
 	_ = c.Close()
 
-	if err := <-be.dataErrors; err != smtp.ErrConnection {
+	if err := <-be.dataErrors; err != deltasmtp.ErrConnection {
 		t.Fatal("Backend received a different error:", err)
 	}
 }
@@ -1577,7 +1577,7 @@ func TestServer_Chunking_EarlyError(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	be.dataErr = smtp.NewStatusS(555, smtp.EnhancedCode{5, 0, 0}, "I failed")
+	be.dataErr = deltasmtp.NewStatusS(555, deltasmtp.EnhancedCode{5, 0, 0}, "I failed")
 
 	_, _ = io.WriteString(c, "MAIL FROM:<root@nsa.gov>\r\n")
 	scanOk(t, c, scanner)
@@ -1606,7 +1606,7 @@ func TestServer_Chunking_EarlyErrorDuringChunk(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	be.dataErr = smtp.NewStatusS(555, smtp.EnhancedCode{5, 0, 0}, "I failed")
+	be.dataErr = deltasmtp.NewStatusS(555, deltasmtp.EnhancedCode{5, 0, 0}, "I failed")
 
 	_, _ = io.WriteString(c, "MAIL FROM:<root@nsa.gov>\r\n")
 	scanOk(t, c, scanner)
@@ -1870,9 +1870,9 @@ func TestServerDELIVERBY(t *testing.T) {
 		t.Fatal("DeliverBy is nil")
 	}
 
-	want := smtp.DeliverByOptions{
+	want := deltasmtp.DeliverByOptions{
 		Seconds: 100,
-		Mode:    smtp.DeliverByNotify,
+		Mode:    deltasmtp.DeliverByNotify,
 		Trace:   true,
 	}
 	if *opts.DeliverBy != want {
@@ -2055,7 +2055,7 @@ func TestServerDSN(t *testing.T) {
 		t.Fatal("Invalid number of sent messages:", be.messages, be.anonmsgs)
 	}
 
-	if val := be.anonmsgs[0].Opts.Return; val != smtp.DSNReturnHeaders {
+	if val := be.anonmsgs[0].Opts.Return; val != deltasmtp.DSNReturnHeaders {
 		t.Fatal("Invalid RET parameter value:", val)
 	}
 	if val := be.anonmsgs[0].Opts.EnvelopeID; val != dsnEnvelopeID {
@@ -2077,20 +2077,20 @@ func TestServerDSN(t *testing.T) {
 	if opts == nil || len(opts) != 2 {
 		t.Fatal("Invalid number of recipients:", opts)
 	}
-	if val := opts[0].Notify; val == nil || len(val) != 1 || val[0] != smtp.DSNNotifyNever {
+	if val := opts[0].Notify; val == nil || len(val) != 1 || val[0] != deltasmtp.DSNNotifyNever {
 		t.Fatal("Invalid NOTIFY parameter value:", val)
 	}
-	if val := opts[0].OriginalRecipientType; val != smtp.DSNAddressTypeRFC822 {
+	if val := opts[0].OriginalRecipientType; val != deltasmtp.DSNAddressTypeRFC822 {
 		t.Fatal("Invalid ORCPT address type:", val)
 	}
 	if val := opts[0].OriginalRecipient; val != dsnEmailRFC822 {
 		t.Fatal("Invalid ORCPT address:", val)
 	}
 	if val := opts[1].Notify; val == nil || len(val) != 2 ||
-		val[0] != smtp.DSNNotifyFailure || val[1] != smtp.DSNNotifyDelayed {
+		val[0] != deltasmtp.DSNNotifyFailure || val[1] != deltasmtp.DSNNotifyDelayed {
 		t.Fatal("Invalid NOTIFY parameter value:", val)
 	}
-	if val := opts[1].OriginalRecipientType; val != smtp.DSNAddressTypeUTF8 {
+	if val := opts[1].OriginalRecipientType; val != deltasmtp.DSNAddressTypeUTF8 {
 		t.Fatal("Invalid ORCPT address type:", val)
 	}
 	if val := opts[1].OriginalRecipient; val != dsnEmailUTF8 {
@@ -2172,7 +2172,7 @@ func TestServerDSNwithSMTPUTF8(t *testing.T) {
 		t.Fatal("Invalid number of sent messages:", be.messages, be.anonmsgs)
 	}
 
-	if val := be.anonmsgs[0].Opts.Return; val != smtp.DSNReturnHeaders {
+	if val := be.anonmsgs[0].Opts.Return; val != deltasmtp.DSNReturnHeaders {
 		t.Fatal("Invalid RET parameter value:", val)
 	}
 	if val := be.anonmsgs[0].Opts.EnvelopeID; val != dsnEnvelopeID {
@@ -2198,30 +2198,30 @@ func TestServerDSNwithSMTPUTF8(t *testing.T) {
 	if opts == nil || len(opts) != 3 {
 		t.Fatal("Invalid number of recipients:", opts)
 	}
-	if val := opts[0].Notify; val == nil || len(val) != 1 || val[0] != smtp.DSNNotifyNever {
+	if val := opts[0].Notify; val == nil || len(val) != 1 || val[0] != deltasmtp.DSNNotifyNever {
 		t.Fatal("Invalid NOTIFY parameter value:", val)
 	}
-	if val := opts[0].OriginalRecipientType; val != smtp.DSNAddressTypeRFC822 {
+	if val := opts[0].OriginalRecipientType; val != deltasmtp.DSNAddressTypeRFC822 {
 		t.Fatal("Invalid ORCPT address type:", val)
 	}
 	if val := opts[0].OriginalRecipient; val != dsnEmailRFC822 {
 		t.Fatal("Invalid ORCPT address:", val)
 	}
 	if val := opts[1].Notify; val == nil || len(val) != 2 ||
-		val[0] != smtp.DSNNotifyFailure || val[1] != smtp.DSNNotifyDelayed {
+		val[0] != deltasmtp.DSNNotifyFailure || val[1] != deltasmtp.DSNNotifyDelayed {
 		t.Fatal("Invalid NOTIFY parameter value:", val)
 	}
-	if val := opts[1].OriginalRecipientType; val != smtp.DSNAddressTypeUTF8 {
+	if val := opts[1].OriginalRecipientType; val != deltasmtp.DSNAddressTypeUTF8 {
 		t.Fatal("Invalid ORCPT address type:", val)
 	}
 	if val := opts[1].OriginalRecipient; val != dsnEmailUTF8 {
 		t.Fatal("Invalid ORCPT address:", val)
 	}
 	// utf-8-addr-unitext form is allowed in ORCPT parameter value
-	if val := opts[2].Notify; val == nil || len(val) != 1 || val[0] != smtp.DSNNotifySuccess {
+	if val := opts[2].Notify; val == nil || len(val) != 1 || val[0] != deltasmtp.DSNNotifySuccess {
 		t.Fatal("Invalid NOTIFY parameter value:", val)
 	}
-	if val := opts[2].OriginalRecipientType; val != smtp.DSNAddressTypeUTF8 {
+	if val := opts[2].OriginalRecipientType; val != deltasmtp.DSNAddressTypeUTF8 {
 		t.Fatal("Invalid ORCPT address type:", val)
 	}
 	if val := opts[2].OriginalRecipient; val != dsnEmailUTF8 {
@@ -2450,7 +2450,7 @@ func TestServer_DataTimeoutClearedAfterTransfer(t *testing.T) {
 // TestServer_MultiDigitEnhancedCode checks that a backend's enhanced code with a
 // multi-digit detail (RFC 3463, e.g. Gmail's 5.7.26) goes out unchanged on every line.
 func TestServer_MultiDigitEnhancedCode(t *testing.T) {
-	rejected := smtp.NewStatusM(550, smtp.EnhancedCode{5, 7, 26}, []string{"DMARC", "policy"})
+	rejected := deltasmtp.NewStatusM(550, deltasmtp.EnhancedCode{5, 7, 26}, []string{"DMARC", "policy"})
 	_, c, scanner := limitTestServer(t, &backend{rejectAfterOpen: rejected}, 0)
 
 	_, _ = io.WriteString(c, "DATA\r\n")

@@ -1,4 +1,4 @@
-package smtp_test
+package deltasmtp_test
 
 import (
 	"bytes"
@@ -25,9 +25,9 @@ var embedTestdata embed.FS
 type message struct {
 	From     string
 	To       []string
-	RcptOpts []*smtp.RcptOptions
+	RcptOpts []*deltasmtp.RcptOptions
 	Data     []byte
-	Opts     *smtp.MailOptions
+	Opts     *deltasmtp.MailOptions
 }
 
 type backend struct{}
@@ -66,18 +66,18 @@ func (*session) STARTTLS(_ context.Context, tls *tls.Config) (*tls.Config, error
 	return tls, nil
 }
 
-func (*session) Verify(_ context.Context, _ string, _ *smtp.VrfyOptions) error {
+func (*session) Verify(_ context.Context, _ string, _ *deltasmtp.VrfyOptions) error {
 	return nil
 }
 
-func (s *session) Mail(ctx context.Context, from string, opts *smtp.MailOptions) error {
+func (s *session) Mail(ctx context.Context, from string, opts *deltasmtp.MailOptions) error {
 	_, _ = s.Reset(ctx, false)
 	s.msg.From = from
 	s.msg.Opts = opts
 	return nil
 }
 
-func (s *session) Rcpt(_ context.Context, to string, opts *smtp.RcptOptions) error {
+func (s *session) Rcpt(_ context.Context, to string, opts *deltasmtp.RcptOptions) error {
 	s.msg.To = append(s.msg.To, to)
 	s.msg.RcptOpts = append(s.msg.RcptOpts, opts)
 	return nil

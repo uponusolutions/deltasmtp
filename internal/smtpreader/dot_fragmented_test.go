@@ -81,7 +81,7 @@ func TestDataReaderBulkLimit(t *testing.T) {
 	for _, limit := range []int64{1, 63, 4095, 4096, 4097} {
 		r := smtpreader.NewDot(bufio.NewReader(strings.NewReader(strings.Repeat("a", 8192)+"\r\n.\r\n")), limit)
 		data, err := io.ReadAll(r)
-		if err != smtp.ErrDataTooLarge || int64(len(data)) != limit {
+		if err != deltasmtp.ErrDataTooLarge || int64(len(data)) != limit {
 			t.Fatalf("limit %d: read %d, %v", limit, len(data), err)
 		}
 	}

@@ -28,15 +28,15 @@ func (d *ContentCloser) Write(p []byte) (n int, err error) {
 	}
 	n, err = d.writer.Write(p)
 	// The message is only partly sent, the connection can't be used anymore.
-	// A rejected BDAT chunk (*smtp.Status) leaves it in sync.
-	if _, ok := err.(*smtp.Status); err != nil && !ok {
+	// A rejected BDAT chunk (*deltasmtp.Status) leaves it in sync.
+	if _, ok := err.(*deltasmtp.Status); err != nil && !ok {
 		_ = d.c.Close()
 	}
 	return n, err
 }
 
 // CloseWithResponse closes the data closer and returns code, msg.
-func (d *ContentCloser) CloseWithResponse() (*smtp.Status, error) {
+func (d *ContentCloser) CloseWithResponse() (*deltasmtp.Status, error) {
 	if d.closed {
 		return nil, errors.New("smtp: data writer closed twice")
 	}
@@ -48,7 +48,7 @@ func (d *ContentCloser) CloseWithResponse() (*smtp.Status, error) {
 	}
 
 	if err := d.writer.Close(); err != nil {
-		if _, ok := err.(*smtp.Status); !ok {
+		if _, ok := err.(*deltasmtp.Status); !ok {
 			_ = d.c.Close()
 		}
 		return nil, err

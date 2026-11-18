@@ -186,15 +186,15 @@ func TestBasic_smtp(t *testing.T) {
 	if err == nil {
 		t.Fatal("MAIL succeeded")
 	}
-	smtpErr, ok := err.(*smtp.Status)
+	smtpErr, ok := err.(*deltasmtp.Status)
 	if !ok {
 		t.Fatal("Returned error is not smtp")
 	}
 	if smtpErr.Code != 500 {
 		t.Fatalf("Wrong status code, got %d, want %d", smtpErr.Code, 500)
 	}
-	if smtpErr.EnhancedCode != (smtp.EnhancedCode{5, 0, 0}) {
-		t.Fatalf("Wrong enhanced code, got %v, want %v", smtpErr.EnhancedCode, smtp.EnhancedCode{5, 0, 0})
+	if smtpErr.EnhancedCode != (deltasmtp.EnhancedCode{5, 0, 0}) {
+		t.Fatalf("Wrong enhanced code, got %v, want %v", smtpErr.EnhancedCode, deltasmtp.EnhancedCode{5, 0, 0})
 	}
 	if smtpErr.Lines[0] != "Failing with enhanced code" {
 		t.Fatalf("Wrong message, got %s, want %s", smtpErr.Lines, "Failing with enhanced code")
@@ -204,7 +204,7 @@ func TestBasic_smtp(t *testing.T) {
 	if err == nil {
 		t.Fatal("MAIL succeeded")
 	}
-	smtpErr, ok = err.(*smtp.Status)
+	smtpErr, ok = err.(*deltasmtp.Status)
 	if !ok {
 		t.Fatal("Returned error is not smtp")
 	}
@@ -219,7 +219,7 @@ func TestBasic_smtp(t *testing.T) {
 	if err == nil {
 		t.Fatal("MAIL succeeded")
 	}
-	smtpErr, ok = err.(*smtp.Status)
+	smtpErr, ok = err.(*deltasmtp.Status)
 	if !ok {
 		t.Fatal("Returned error is not smtp")
 	}
@@ -311,7 +311,7 @@ func TestClient_TooLongLine(t *testing.T) {
 	require.NoError(t, c.Hello())
 
 	err := c.Mail("whatever", nil)
-	if err != smtp.ErrTooLongLine {
+	if err != deltasmtp.ErrTooLongLine {
 		t.Fatal("MAIL succeeded or returned a different error:", err)
 	}
 
@@ -589,9 +589,9 @@ func TestHello_421Response(t *testing.T) {
 		t.Error("Expected Hello to fail")
 	}
 
-	var smtp *smtp.Status
-	if !errors.As(err, &smtp) || smtp.Code != 421 ||
-		smtp.Lines[0] != "Service not available, closing transmission channel" {
+	var status *deltasmtp.Status
+	if !errors.As(err, &status) || status.Code != 421 ||
+		status.Lines[0] != "Service not available, closing transmission channel" {
 		t.Errorf("Expected error 421, got %v", err)
 	}
 
@@ -727,8 +727,8 @@ func TestClientXtext(t *testing.T) {
 	c.connExt = map[string]string{"AUTH": "PLAIN", "DSN": ""}
 	email := "e=mc2@example.com"
 	require.Error(t, c.Mail(email, &MailOptions{Auth: &email}))
-	require.NoError(t, c.Rcpt(email, &smtp.RcptOptions{
-		OriginalRecipientType: smtp.DSNAddressTypeUTF8,
+	require.NoError(t, c.Rcpt(email, &deltasmtp.RcptOptions{
+		OriginalRecipientType: deltasmtp.DSNAddressTypeUTF8,
 		OriginalRecipient:     email,
 	}))
 	require.NoError(t, c.Close())
@@ -768,22 +768,22 @@ func TestClientDSN(t *testing.T) {
 
 	c.connExt = map[string]string{"DSN": ""}
 	require.Error(t, c.Mail(dsnEmailRFC822, &MailOptions{
-		Return:     smtp.DSNReturnHeaders,
+		Return:     deltasmtp.DSNReturnHeaders,
 		EnvelopeID: dsnEnvelopeID,
 	}))
-	require.NoError(t, c.Rcpt(dsnEmailRFC822, &smtp.RcptOptions{
-		OriginalRecipientType: smtp.DSNAddressTypeRFC822,
+	require.NoError(t, c.Rcpt(dsnEmailRFC822, &deltasmtp.RcptOptions{
+		OriginalRecipientType: deltasmtp.DSNAddressTypeRFC822,
 		OriginalRecipient:     dsnEmailRFC822,
-		Notify:                []smtp.DSNNotify{smtp.DSNNotifyNever},
+		Notify:                []deltasmtp.DSNNotify{deltasmtp.DSNNotifyNever},
 	}))
-	require.NoError(t, c.Rcpt(dsnEmailRFC822, &smtp.RcptOptions{
-		OriginalRecipientType: smtp.DSNAddressTypeUTF8,
+	require.NoError(t, c.Rcpt(dsnEmailRFC822, &deltasmtp.RcptOptions{
+		OriginalRecipientType: deltasmtp.DSNAddressTypeUTF8,
 		OriginalRecipient:     dsnEmailUTF8,
-		Notify:                []smtp.DSNNotify{smtp.DSNNotifyFailure, smtp.DSNNotifyDelayed},
+		Notify:                []deltasmtp.DSNNotify{deltasmtp.DSNNotifyFailure, deltasmtp.DSNNotifyDelayed},
 	}))
 	c.connExt["SMTPUTF8"] = ""
-	require.NoError(t, c.Rcpt(dsnEmailUTF8, &smtp.RcptOptions{
-		OriginalRecipientType: smtp.DSNAddressTypeUTF8,
+	require.NoError(t, c.Rcpt(dsnEmailUTF8, &deltasmtp.RcptOptions{
+		OriginalRecipientType: deltasmtp.DSNAddressTypeUTF8,
 		OriginalRecipient:     dsnEmailUTF8,
 	}))
 	require.NoError(t, c.Close())
@@ -942,9 +942,9 @@ func TestClientDELIVERBY(t *testing.T) {
 	c.setConn(fake)
 	c.connExt = map[string]string{"DELIVERBY": ""}
 	_ = c.Mail("root@nsa.gov", &MailOptions{
-		DeliverBy: &smtp.DeliverByOptions{
+		DeliverBy: &deltasmtp.DeliverByOptions{
 			Seconds: 100,
-			Mode:    smtp.DeliverByReturn,
+			Mode:    deltasmtp.DeliverByReturn,
 			Trace:   true,
 		},
 	})
@@ -1165,7 +1165,7 @@ func TestClientProtocolErrorCloses(t *testing.T) {
 	t.Run("status reply keeps the connection", func(t *testing.T) {
 		c := connect(t, "250 localhost\r\n550 5.1.1 unknown\r\n250 2.1.5 OK\r\n")
 
-		var status *smtp.Status
+		var status *deltasmtp.Status
 		require.ErrorAs(t, c.Rcpt("a@example.com", nil), &status)
 		require.True(t, c.Connected())
 		require.NoError(t, c.Rcpt("b@example.com", nil))

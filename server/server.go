@@ -104,7 +104,7 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 
 	defer func() {
 		if err := recover(); err != nil {
-			c.writeStatus(smtp.ErrInternal)
+			c.writeStatus(deltasmtp.ErrInternal)
 			stack := debug.Stack()
 			c.logger().ErrorContext(
 				c.ctx,
@@ -131,10 +131,10 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 
 	if exceeded || exceededPerIP {
 		// Overall limit first, the client isn't at fault for a busy server.
-		status := smtp.ErrTooManyConnections
+		status := deltasmtp.ErrTooManyConnections
 		if !exceeded {
 			// Same reply as Postfix for smtpd_client_connection_count_limit.
-			status = smtp.NewStatusS(421, smtp.EnhancedCode{4, 7, 0},
+			status = deltasmtp.NewStatusS(421, deltasmtp.EnhancedCode{4, 7, 0},
 				fmt.Sprintf("%s Error: too many connections from %s", s.hostname, ip))
 		}
 		c.writeStatus(status)

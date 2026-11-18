@@ -146,7 +146,7 @@ func TestDotReader(t *testing.T) {
 		buf = bufio.NewReader(strings.NewReader(input))
 		r = smtpreader.NewDot(buf, 34)
 		b, err = io.ReadAll(r)
-		require.Error(t, smtp.ErrDataTooLarge, err)
+		require.Error(t, deltasmtp.ErrDataTooLarge, err)
 		require.Equal(t, []byte("dotlines\r\nfoo\r\n.bar\n...baz\nquux\r\n\r"), b)
 	})
 }
@@ -381,12 +381,12 @@ func TestDotReaderLimitSticky(t *testing.T) {
 	r := smtpreader.NewDot(buf, 34)
 
 	_, err := io.ReadAll(r)
-	require.ErrorIs(t, err, smtp.ErrDataTooLarge)
+	require.ErrorIs(t, err, deltasmtp.ErrDataTooLarge)
 
 	for range 3 {
 		n, err := r.Read(make([]byte, 10))
 		require.Zero(t, n)
-		require.ErrorIs(t, err, smtp.ErrDataTooLarge)
+		require.ErrorIs(t, err, deltasmtp.ErrDataTooLarge)
 	}
 
 	// the terminator and the following command are still pending on the input

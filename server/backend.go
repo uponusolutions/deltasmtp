@@ -44,16 +44,16 @@ type Session interface {
 	Logger(ctx context.Context) *slog.Logger
 
 	// Set return path for currently processed message.
-	Mail(ctx context.Context, from string, opts *smtp.MailOptions) error
+	Mail(ctx context.Context, from string, opts *deltasmtp.MailOptions) error
 
 	// Add recipient for currently processed message.
-	Rcpt(ctx context.Context, to string, opts *smtp.RcptOptions) error
+	Rcpt(ctx context.Context, to string, opts *deltasmtp.RcptOptions) error
 
 	// Verify checks the validity of an email address on the server.
 	// If error is nil then smtp code 252 is send
 	// if error is smtp status then the smtp status is send
 	// else internal server error is returned and connection is closed
-	Verify(ctx context.Context, addr string, opts *smtp.VrfyOptions) error
+	Verify(ctx context.Context, addr string, opts *deltasmtp.VrfyOptions) error
 
 	// Set currently processed message contents and send it.
 	// If r is called then the data must be consumed completely before returning.

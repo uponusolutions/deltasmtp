@@ -49,21 +49,21 @@ func (s *Session) Auth(_ context.Context, _ string) (sasl.Server, error) {
 	}), nil
 }
 
-func (s *Session) Mail(_ context.Context, from string, _ *smtp.MailOptions) error {
+func (s *Session) Mail(_ context.Context, from string, _ *deltasmtp.MailOptions) error {
 	if !s.auth {
-		return smtp.ErrAuthRequired
+		return deltasmtp.ErrAuthRequired
 	}
 	log.Println("Mail from:", from)
 	return nil
 }
 
-func (*Session) Verify(_ context.Context, _ string, _ *smtp.VrfyOptions) error {
+func (*Session) Verify(_ context.Context, _ string, _ *deltasmtp.VrfyOptions) error {
 	return nil
 }
 
-func (s *Session) Rcpt(_ context.Context, to string, _ *smtp.RcptOptions) error {
+func (s *Session) Rcpt(_ context.Context, to string, _ *deltasmtp.RcptOptions) error {
 	if !s.auth {
-		return smtp.ErrAuthRequired
+		return deltasmtp.ErrAuthRequired
 	}
 	log.Println("Rcpt to:", to)
 	return nil
@@ -75,7 +75,7 @@ func (*Session) STARTTLS(_ context.Context, tls *tls.Config) (*tls.Config, error
 
 func (s *Session) Data(_ context.Context, r func() io.Reader) (string, error) {
 	if !s.auth {
-		return "", smtp.ErrAuthRequired
+		return "", deltasmtp.ErrAuthRequired
 	}
 
 	b, err := io.ReadAll(r())

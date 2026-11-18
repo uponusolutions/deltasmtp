@@ -97,7 +97,7 @@ type Server struct {
 	// in RFC 6710 section 10.2.
 	//
 	// Default value of NONE to advertise no specific profile.
-	mtPriorityProfile smtp.PriorityProfile
+	mtPriorityProfile deltasmtp.PriorityProfile
 
 	// Additional check for every parsed mailbox, nil means no check.
 	addressValidator func(addr string) error
@@ -202,7 +202,7 @@ func WithBackend(backend Backend) Option {
 // SMTPUTF8, before it is passed to the session. The null reverse-path "<>" of
 // MAIL FROM is not an address and is not validated.
 //
-// A non-nil error rejects the command. A *smtp.Status with a negative reply is
+// A non-nil error rejects the command. A *deltasmtp.Status with a negative reply is
 // sent to the client as it is, any other error results in 553 5.1.7 (MAIL) or
 // 553 5.1.3 (RCPT and VRFY). A rejected recipient is not counted.
 //
@@ -440,7 +440,7 @@ func WithEnableMTPRIORITY(enableMTPRIORITY bool) Option {
 // in RFC 6710 section 10.2.
 //
 // Default value of NONE to advertise no specific profile.
-func WithMtPriorityProfile(mtPriorityProfile smtp.PriorityProfile) Option {
+func WithMtPriorityProfile(mtPriorityProfile deltasmtp.PriorityProfile) Option {
 	return func(s *Server) {
 		s.mtPriorityProfile = mtPriorityProfile
 	}

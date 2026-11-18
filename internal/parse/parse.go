@@ -452,15 +452,15 @@ func IsPrintableASCII(val string) bool {
 }
 
 // CheckNotifySet checks if a DSNNotify array isn't malformed.
-func CheckNotifySet(values []smtp.DSNNotify) error {
+func CheckNotifySet(values []deltasmtp.DSNNotify) error {
 	if len(values) == 0 {
 		return errors.New("malformed NOTIFY parameter value")
 	}
 
-	seen := map[smtp.DSNNotify]struct{}{}
+	seen := map[deltasmtp.DSNNotify]struct{}{}
 	for _, val := range values {
 		switch val {
-		case smtp.DSNNotifyNever, smtp.DSNNotifyDelayed, smtp.DSNNotifyFailure, smtp.DSNNotifySuccess:
+		case deltasmtp.DSNNotifyNever, deltasmtp.DSNNotifyDelayed, deltasmtp.DSNNotifyFailure, deltasmtp.DSNNotifySuccess:
 			if _, ok := seen[val]; ok {
 				return errors.New("malformed NOTIFY parameter value")
 			}
@@ -469,7 +469,7 @@ func CheckNotifySet(values []smtp.DSNNotify) error {
 		}
 		seen[val] = struct{}{}
 	}
-	if _, ok := seen[smtp.DSNNotifyNever]; ok && len(seen) > 1 {
+	if _, ok := seen[deltasmtp.DSNNotifyNever]; ok && len(seen) > 1 {
 		return errors.New("malformed NOTIFY parameter value")
 	}
 

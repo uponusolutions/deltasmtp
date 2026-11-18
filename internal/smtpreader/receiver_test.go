@@ -36,7 +36,7 @@ type parseFirstCodeLineTest struct {
 	codeLine        string
 	wantCode        int
 	wantContinued   bool
-	wantEnhCode     smtp.EnhancedCode
+	wantEnhCode     deltasmtp.EnhancedCode
 	wantMsg         string
 	wantErrContains string
 }
@@ -46,7 +46,7 @@ var parseFirstCodeLineTests = []parseFirstCodeLineTest{
 		"123 test",
 		123,
 		false,
-		smtp.NoEnhancedCode,
+		deltasmtp.NoEnhancedCode,
 		"test",
 		"",
 	},
@@ -54,7 +54,7 @@ var parseFirstCodeLineTests = []parseFirstCodeLineTest{
 		"123-test",
 		123,
 		true,
-		smtp.NoEnhancedCode,
+		deltasmtp.NoEnhancedCode,
 		"test",
 		"",
 	},
@@ -62,7 +62,7 @@ var parseFirstCodeLineTests = []parseFirstCodeLineTest{
 		"123-1.2 test",
 		123,
 		true,
-		smtp.NoEnhancedCode,
+		deltasmtp.NoEnhancedCode,
 		"1.2 test",
 		"",
 	},
@@ -71,7 +71,7 @@ var parseFirstCodeLineTests = []parseFirstCodeLineTest{
 		"123-1.2.3 test",
 		123,
 		true,
-		smtp.NoEnhancedCode,
+		deltasmtp.NoEnhancedCode,
 		"1.2.3 test",
 		"",
 	},
@@ -79,7 +79,7 @@ var parseFirstCodeLineTests = []parseFirstCodeLineTest{
 		"523-5.2.3 test",
 		523,
 		true,
-		smtp.EnhancedCode{5, 2, 3},
+		deltasmtp.EnhancedCode{5, 2, 3},
 		"test",
 		"",
 	},
@@ -88,7 +88,7 @@ var parseFirstCodeLineTests = []parseFirstCodeLineTest{
 		"550-5.7.26 test",
 		550,
 		true,
-		smtp.EnhancedCode{5, 7, 26},
+		deltasmtp.EnhancedCode{5, 7, 26},
 		"test",
 		"",
 	},
@@ -96,7 +96,7 @@ var parseFirstCodeLineTests = []parseFirstCodeLineTest{
 		"451 4.123.999 test",
 		451,
 		false,
-		smtp.EnhancedCode{4, 123, 999},
+		deltasmtp.EnhancedCode{4, 123, 999},
 		"test",
 		"",
 	},
@@ -104,7 +104,7 @@ var parseFirstCodeLineTests = []parseFirstCodeLineTest{
 		"550 4.7.1 class mismatch",
 		550,
 		false,
-		smtp.NoEnhancedCode,
+		deltasmtp.NoEnhancedCode,
 		"4.7.1 class mismatch",
 		"",
 	},
@@ -112,7 +112,7 @@ var parseFirstCodeLineTests = []parseFirstCodeLineTest{
 		"550 5.1234.1 too many digits",
 		550,
 		false,
-		smtp.NoEnhancedCode,
+		deltasmtp.NoEnhancedCode,
 		"5.1234.1 too many digits",
 		"",
 	},
@@ -120,7 +120,7 @@ var parseFirstCodeLineTests = []parseFirstCodeLineTest{
 		"550 5.07.1 leading zero",
 		550,
 		false,
-		smtp.NoEnhancedCode,
+		deltasmtp.NoEnhancedCode,
 		"5.07.1 leading zero",
 		"",
 	},
@@ -128,7 +128,7 @@ var parseFirstCodeLineTests = []parseFirstCodeLineTest{
 		"550 5.+7.1 sign",
 		550,
 		false,
-		smtp.NoEnhancedCode,
+		deltasmtp.NoEnhancedCode,
 		"5.+7.1 sign",
 		"",
 	},
@@ -136,7 +136,7 @@ var parseFirstCodeLineTests = []parseFirstCodeLineTest{
 		"550 55.7.1 class with two digits",
 		550,
 		false,
-		smtp.NoEnhancedCode,
+		deltasmtp.NoEnhancedCode,
 		"55.7.1 class with two digits",
 		"",
 	},
@@ -144,7 +144,7 @@ var parseFirstCodeLineTests = []parseFirstCodeLineTest{
 		"323-1.2.3 test",
 		323,
 		true,
-		smtp.NoEnhancedCode,
+		deltasmtp.NoEnhancedCode,
 		"1.2.3 test",
 		"",
 	},
@@ -204,7 +204,7 @@ var parseExtraCodeLineTests = []parseExtraCodeLineTest{
 	{
 		"550-5.7.26 test",
 		"550",
-		smtp.EnhancedCode{5, 7, 26}.ToPart(),
+		deltasmtp.EnhancedCode{5, 7, 26}.ToPart(),
 		true,
 		"test",
 		"",
@@ -213,7 +213,7 @@ var parseExtraCodeLineTests = []parseExtraCodeLineTest{
 		// RFC 2034: the same enhanced code on every line
 		"550 5.7.2 test",
 		"550",
-		smtp.EnhancedCode{5, 7, 26}.ToPart(),
+		deltasmtp.EnhancedCode{5, 7, 26}.ToPart(),
 		false,
 		"",
 		"invalid response",
@@ -322,7 +322,7 @@ func TestReadMultiLine(t *testing.T) {
 		t.Error("ReadResponse: no error, want error")
 	}
 
-	status, ok := err.(*smtp.Status)
+	status, ok := err.(*deltasmtp.Status)
 	require.True(t, ok)
 
 	require.Equal(t, expectedText, status.Text())
@@ -339,10 +339,10 @@ func TestReadMultiLineMultiDigitEnhancedCode(t *testing.T) {
 		"250 2.0.0 OK\r\n", &bytes.Buffer{})
 
 	err := r.ReadResponseValid(250)
-	var status *smtp.Status
+	var status *deltasmtp.Status
 	require.ErrorAs(t, err, &status)
 	require.Equal(t, 550, status.Code)
-	require.Equal(t, smtp.EnhancedCode{5, 7, 26}, status.EnhancedCode)
+	require.Equal(t, deltasmtp.EnhancedCode{5, 7, 26}, status.EnhancedCode)
 	require.Len(t, status.Lines, 3)
 	require.Equal(t, "example.com domain if this was a legitimate mail. - gsmtp", status.Lines[2])
 
@@ -381,9 +381,9 @@ func TestReceiverResetClearsLineLengthExceeded(t *testing.T) {
 	r := NewReceiver(strings.NewReader(strings.Repeat("x", 20)+"\r\n"), 4096, 10, 0)
 
 	_, err := r.ReadFullLine()
-	require.ErrorIs(t, err, smtp.ErrTooLongLine)
+	require.ErrorIs(t, err, deltasmtp.ErrTooLongLine)
 	_, err = r.ReadFullLine()
-	require.ErrorIs(t, err, smtp.ErrTooLongLine, "sticky on the same connection")
+	require.ErrorIs(t, err, deltasmtp.ErrTooLongLine, "sticky on the same connection")
 
 	r.Reset(strings.NewReader("250 OK\r\n"))
 	line, err := r.ReadFullLine()

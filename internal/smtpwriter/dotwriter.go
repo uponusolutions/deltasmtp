@@ -97,7 +97,7 @@ func (d *dot) Write(b []byte) (n int, err error) {
 				if _, err = bw.Write(p[:pLen-1]); err != nil {
 					return n, err
 				}
-				if _, err = bw.Write(smtp.Crnl); err != nil {
+				if _, err = bw.Write(deltasmtp.Crnl); err != nil {
 					return n, err
 				}
 			}
@@ -125,7 +125,7 @@ func (d *dot) Close() error {
 		}
 		fallthrough
 	case wstateBeginLine:
-		if _, err := bw.Write(smtp.Dotcrnl); err != nil {
+		if _, err := bw.Write(deltasmtp.Dotcrnl); err != nil {
 			return err
 		}
 	}

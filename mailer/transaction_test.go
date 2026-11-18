@@ -169,11 +169,11 @@ func (r *statusReader) Read(p []byte) (int, error) {
 		r.sent = true
 		return copy(p, "Hello"), nil
 	}
-	return 0, smtp.ErrDataTooLarge
+	return 0, deltasmtp.ErrDataTooLarge
 }
 
 // TestMailer_SourceStatusErrorClosesConnection checks that a failing message
-// source closes the connection, even with an *smtp.Status error. Part of the
+// source closes the connection, even with an *deltasmtp.Status error. Part of the
 // message is already on the wire, a RSET would end up inside the message.
 func TestMailer_SourceStatusErrorClosesConnection(t *testing.T) {
 	srv, addr := newStrictServer(t, false)
@@ -182,7 +182,7 @@ func TestMailer_SourceStatusErrorClosesConnection(t *testing.T) {
 	t.Cleanup(func() { _ = m.Terminate() })
 
 	_, _, err := m.Send(t.Context(), "alice@internal.com", []string{"bob@external.com"}, &statusReader{})
-	require.ErrorIs(t, err, smtp.ErrDataTooLarge)
+	require.ErrorIs(t, err, deltasmtp.ErrDataTooLarge)
 	assert.False(t, m.Connected())
 
 	_, _, err = m.Send(t.Context(), "alice@internal.com",

@@ -46,8 +46,8 @@ func Standard(opts ...server.Option) *server.Server {
 // It contains a sync.Map with all mails received.
 type Backend struct {
 	Mails sync.Map
-	Mail  func(ctx context.Context, from string, options *smtp.MailOptions) error
-	Rcpt  func(ctx context.Context, to string, options *smtp.RcptOptions) error
+	Mail  func(ctx context.Context, from string, options *deltasmtp.MailOptions) error
+	Rcpt  func(ctx context.Context, to string, options *deltasmtp.RcptOptions) error
 }
 
 // NewBackend returns a new Backend with an empty (not nil) Mails map.
@@ -125,12 +125,12 @@ func (Session) Logger(_ context.Context) *slog.Logger {
 }
 
 // Verify implements the Verify interface.
-func (Session) Verify(_ context.Context, _ string, _ *smtp.VrfyOptions) error {
+func (Session) Verify(_ context.Context, _ string, _ *deltasmtp.VrfyOptions) error {
 	return nil
 }
 
 // Mail implements the Mail interface.
-func (s *Session) Mail(ctx context.Context, from string, options *smtp.MailOptions) error {
+func (s *Session) Mail(ctx context.Context, from string, options *deltasmtp.MailOptions) error {
 	if s.backend.Mail != nil {
 		if err := s.backend.Mail(ctx, from, options); err != nil {
 			return err
@@ -143,7 +143,7 @@ func (s *Session) Mail(ctx context.Context, from string, options *smtp.MailOptio
 }
 
 // Rcpt implements the Rcpt interface.
-func (s *Session) Rcpt(ctx context.Context, to string, options *smtp.RcptOptions) error {
+func (s *Session) Rcpt(ctx context.Context, to string, options *deltasmtp.RcptOptions) error {
 	if s.backend.Rcpt != nil {
 		if err := s.backend.Rcpt(ctx, to, options); err != nil {
 			return err

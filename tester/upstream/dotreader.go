@@ -37,7 +37,7 @@ func NewDotReader(r *bufio.Reader, maxMessageBytes int) *DotReader {
 func (r *DotReader) Read(b []byte) (n int, err error) {
 	if r.limited {
 		if r.n <= 0 {
-			return 0, smtp.ErrDataTooLarge
+			return 0, deltasmtp.ErrDataTooLarge
 		}
 		if int64(len(b)) > r.n {
 			b = b[0:r.n]

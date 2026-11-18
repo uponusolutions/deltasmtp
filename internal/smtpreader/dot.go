@@ -48,7 +48,7 @@ func (r *dot) Read(b []byte) (int, error) {
 
 	if r.limited {
 		if r.n <= 0 {
-			return 0, smtp.ErrDataTooLarge
+			return 0, deltasmtp.ErrDataTooLarge
 		}
 
 		if int64(len(b)) > r.n {
@@ -104,7 +104,7 @@ func (r *dot) Read(b []byte) (int, error) {
 	}
 
 	for {
-		i := bytes.Index(c, smtp.Crlfdot)
+		i := bytes.Index(c, deltasmtp.Crlfdot)
 
 		// No full \r\n. found.
 		if i == -1 {

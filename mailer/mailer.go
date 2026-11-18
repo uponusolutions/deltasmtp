@@ -1,4 +1,4 @@
-// Package mailer implements a mailer to send mail by smtp.
+// Package mailer implements a mailer to send mail by deltasmtp.
 // It uses the client library and provides high level functionality.
 package mailer
 
@@ -153,7 +153,7 @@ func (c *Mailer) prepare(
 	from string,
 	mailOptions *client.MailOptions,
 	rcpts []string,
-	rcptsOptions []*smtp.RcptOptions,
+	rcptsOptions []*deltasmtp.RcptOptions,
 	size int,
 ) (*client.ContentCloser, []resolve.Failure, error) {
 	if mailOptions == nil && size > 0 {
@@ -175,7 +175,7 @@ func (c *Mailer) prepare(
 
 	// RCPT TO:
 	for i, addr := range rcpts {
-		var rcptsOption *smtp.RcptOptions
+		var rcptsOption *deltasmtp.RcptOptions
 		if len(rcptsOptions) > i {
 			rcptsOption = rcptsOptions[i]
 		}
@@ -301,10 +301,10 @@ func (c *Mailer) reset() (err error) {
 }
 
 // abort ends a failed transaction and returns err.
-// An *smtp.Status error leaves the connection in sync, so it is kept after a successful RSET.
+// An *deltasmtp.Status error leaves the connection in sync, so it is kept after a successful RSET.
 // Any other error, or a failing RSET, leaves it in an unknown state and it is closed.
 func (c *Mailer) abort(err error) error {
-	if _, ok := err.(*smtp.Status); ok {
+	if _, ok := err.(*deltasmtp.Status); ok {
 		errReset := c.reset()
 		if errReset == nil {
 			return err
@@ -316,7 +316,7 @@ func (c *Mailer) abort(err error) error {
 
 func rcptError(addr string, abortOnRcptReject bool, failures []resolve.Failure, err error) ([]resolve.Failure, error) {
 	// continue sending if code is not 421 and abort on rcpt reject is disabled
-	if smtpErr, ok := err.(*smtp.Status); !ok || abortOnRcptReject || smtpErr.Code == 421 {
+	if smtpErr, ok := err.(*deltasmtp.Status); !ok || abortOnRcptReject || smtpErr.Code == 421 {
 		return nil, err
 	}
 
@@ -341,7 +341,7 @@ func rcptError(addr string, abortOnRcptReject bool, failures []resolve.Failure, 
 // fields such as "From", "To", "Subject", and "Cc".  Sending "Bcc"
 // messages is accomplished by including an email address in the to
 // parameter but not including it in the in headers.
-func (c *Mailer) Send(ctx context.Context, from string, rcpt []string, in io.Reader) (status *smtp.Status, failures []resolve.Failure, err error) {
+func (c *Mailer) Send(ctx context.Context, from string, rcpt []string, in io.Reader) (status *deltasmtp.Status, failures []resolve.Failure, err error) {
 	return c.SendAdvanced(ctx, from, nil, rcpt, nil, in)
 }
 
@@ -368,9 +368,9 @@ func (c *Mailer) SendAdvanced(
 	from string,
 	mailOptions *client.MailOptions,
 	rcpts []string,
-	rcptsOptions []*smtp.RcptOptions,
+	rcptsOptions []*deltasmtp.RcptOptions,
 	in io.Reader,
-) (status *smtp.Status, failures []resolve.Failure, err error) {
+) (status *deltasmtp.Status, failures []resolve.Failure, err error) {
 	size := 0
 	if wt, ok := in.(Len); ok {
 		size = wt.Len()
@@ -405,7 +405,7 @@ func (c *Mailer) SendAdvanced(
 	if _, err = io.Copy(w.Writer(), in); err != nil {
 		// The message is only partly sent, the connection can't be reused. This includes a
 		// rejected BDAT chunk, which would leave it in sync, but can't be told apart from an
-		// *smtp.Status returned by in (e.g. the data reader of a server).
+		// *deltasmtp.Status returned by in (e.g. the data reader of a server).
 		return nil, failures, errors.Join(err, c.client.Close())
 	}
 
@@ -472,7 +472,7 @@ type Report struct {
 
 // Response contains the response of a smtp server for specific recipients.
 type Response struct {
-	Status *smtp.Status
+	Status *deltasmtp.Status
 	Rcpts  []string
 }
 
@@ -555,7 +555,7 @@ func Send(ctx context.Context, from string, rcpts []string, in func() io.Reader,
 	return res, nil
 }
 
-func send(ctx context.Context, server resolve.Server, from string, config Config, in io.Reader) (status *smtp.Status, failures []resolve.Failure, err error) {
+func send(ctx context.Context, server resolve.Server, from string, config Config, in io.Reader) (status *deltasmtp.Status, failures []resolve.Failure, err error) {
 	config.extra.serverAddresses = server.Addresses
 	client := NewFromConfig(config)
 	defer func() { _ = client.Disconnect() }()

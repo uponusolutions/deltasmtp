@@ -29,9 +29,9 @@ import (
 // naming the address in the reply so tests can tell the rejections apart.
 var backend = testserver.Backend{
 	Mails: sync.Map{},
-	Rcpt: func(_ context.Context, to string, _ *smtp.RcptOptions) error {
+	Rcpt: func(_ context.Context, to string, _ *deltasmtp.RcptOptions) error {
 		if strings.HasPrefix(to, "notfound") {
-			return smtp.NewStatusS(550, smtp.NoEnhancedCode, "not found "+to)
+			return deltasmtp.NewStatusS(550, deltasmtp.NoEnhancedCode, "not found "+to)
 		}
 		return nil
 	},
@@ -252,7 +252,7 @@ func TestClient_SendMailTooManyRcptsAbortPipelining(t *testing.T) {
 
 	status, failures, err := c.Send(context.Background(), from, recipients, in)
 	require.Equal(t,
-		smtp.NewStatusS(452, smtp.EnhancedCode{4, 5, 3}, "Maximum limit of 1000 recipients reached"),
+		deltasmtp.NewStatusS(452, deltasmtp.EnhancedCode{4, 5, 3}, "Maximum limit of 1000 recipients reached"),
 		err,
 	)
 	require.Nil(t, status)
@@ -363,7 +363,7 @@ func TestClient_SendMailDirectTooManyRcptsPipelining(t *testing.T) {
 			require.Equal(t, 1000, len(res.Responses[0].Rcpts))
 			require.Equal(t, 1, len(res.Failures))
 			require.Equal(t,
-				smtp.NewStatusS(452, smtp.EnhancedCode{4, 5, 3}, "Maximum limit of 1000 recipients reached"),
+				deltasmtp.NewStatusS(452, deltasmtp.EnhancedCode{4, 5, 3}, "Maximum limit of 1000 recipients reached"),
 				res.Failures[0].Error,
 			)
 			require.Equal(t,
@@ -491,7 +491,7 @@ func TestClient_SendMailAllRejectedKeepsPerRcptFailures(t *testing.T) {
 				err, ok := byRcpt[rcpt]
 				require.True(t, ok, "no failure reported for %s", rcpt)
 
-				var status *smtp.Status
+				var status *deltasmtp.Status
 				require.ErrorAs(t, err, &status)
 				assert.Equal(t, 550, status.Code,
 					"%s must carry its own rejection, not the DATA rejection", rcpt)
@@ -729,7 +729,7 @@ func TestClient_AllRejectedKeepsConnection(t *testing.T) {
 
 	require.Equal(
 		t,
-		smtp.ErrNoRecipients,
+		deltasmtp.ErrNoRecipients,
 		err,
 		"internal BDAT sizing error leaked to the caller",
 	)
@@ -748,7 +748,7 @@ func TestClient_AllRejectedChunkingKeepsConnection(t *testing.T) {
 
 	require.Equal(
 		t,
-		smtp.ErrNoRecipients,
+		deltasmtp.ErrNoRecipients,
 		err,
 		"internal BDAT sizing error leaked to the caller",
 	)

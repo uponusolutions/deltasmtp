@@ -23,16 +23,16 @@ type bdat struct {
 func BdatArg(arg string) (int64, bool, error) {
 	args := strings.Fields(arg)
 	if len(args) == 0 {
-		return 0, true, smtp.ErrBDATMissingSize
+		return 0, true, deltasmtp.ErrBDATMissingSize
 	}
 	if len(args) > 2 {
-		return 0, true, smtp.ErrBDATTooManyArgs
+		return 0, true, deltasmtp.ErrBDATTooManyArgs
 	}
 
 	last := false
 	if len(args) == 2 {
 		if !strings.EqualFold(args[1], "LAST") {
-			return 0, true, smtp.ErrBDATUnknownArg
+			return 0, true, deltasmtp.ErrBDATUnknownArg
 		}
 		last = true
 	}
@@ -40,7 +40,7 @@ func BdatArg(arg string) (int64, bool, error) {
 	// ParseUint instead of Atoi so we will not accept negative values.
 	size, err := strconv.ParseUint(args[0], 10, 32)
 	if err != nil || (size == 0 && !last) {
-		return 0, true, smtp.ErrBDATMalformedSize
+		return 0, true, deltasmtp.ErrBDATMalformedSize
 	}
 
 	return int64(size), last, nil
@@ -69,7 +69,7 @@ func (d *bdat) Read(b []byte) (int, error) {
 		cmd, arg, err := d.nextCommand()
 		if err != nil {
 			if err == io.EOF {
-				return 0, smtp.ErrConnection
+				return 0, deltasmtp.ErrConnection
 			}
 			return 0, err
 		}
@@ -85,16 +85,16 @@ func (d *bdat) Read(b []byte) (int, error) {
 				return 0, io.EOF
 			}
 		case "RSET":
-			return 0, smtp.Reset
+			return 0, deltasmtp.Reset
 		case "QUIT":
-			return 0, smtp.Quit
+			return 0, deltasmtp.Quit
 		default:
-			return 0, smtp.ErrBDATExpected
+			return 0, deltasmtp.ErrBDATExpected
 		}
 	}
 
 	if d.maxMessageBytes > 0 && d.bytesReceived+d.size > d.maxMessageBytes {
-		return 0, smtp.ErrDataTooLarge
+		return 0, deltasmtp.ErrDataTooLarge
 	}
 
 	if d.chunk == nil {
@@ -107,7 +107,7 @@ func (d *bdat) Read(b []byte) (int, error) {
 
 	// the reader should never throw EOF
 	if err == io.EOF {
-		err = smtp.ErrConnection
+		err = deltasmtp.ErrConnection
 	}
 
 	return n, err

@@ -1,5 +1,5 @@
-// Package smtp contains shared code between client and server implementations e.g. Status
-package smtp
+// Package deltasmtp contains shared code between client and server implementations e.g. Status
+package deltasmtp
 
 import "time"
 

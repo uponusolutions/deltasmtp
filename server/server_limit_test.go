@@ -109,7 +109,7 @@ func TestServerLimit_Data_BackendSwallowsError(t *testing.T) {
 func TestServerLimit_Data_BackendRejectsWithoutReading(t *testing.T) {
 	// The backend rejects the message without reading it, the server discards
 	// the rest itself and hits the limit while doing so.
-	rejected := smtp.NewStatusS(554, smtp.EnhancedCode{5, 6, 0}, "rejected")
+	rejected := deltasmtp.NewStatusS(554, deltasmtp.EnhancedCode{5, 6, 0}, "rejected")
 	be, c, scanner := limitTestServer(t, &backend{rejectAfterOpen: rejected}, 50)
 
 	_, _ = io.WriteString(c, "DATA\r\n")
@@ -122,7 +122,7 @@ func TestServerLimit_Data_BackendRejectsWithoutReading(t *testing.T) {
 
 func TestServerLimit_Data_BackendRejectsWithinLimit(t *testing.T) {
 	// Rejecting a message within the limit keeps the connection usable.
-	rejected := smtp.NewStatusS(554, smtp.EnhancedCode{5, 6, 0}, "rejected")
+	rejected := deltasmtp.NewStatusS(554, deltasmtp.EnhancedCode{5, 6, 0}, "rejected")
 	_, c, scanner := limitTestServer(t, &backend{rejectAfterOpen: rejected}, 50)
 
 	_, _ = io.WriteString(c, "DATA\r\n")
@@ -137,7 +137,7 @@ func TestServerLimit_Data_BackendRejectsWithinLimit(t *testing.T) {
 
 func TestServerLimit_Data_RejectedEndOfDataEndsTransaction(t *testing.T) {
 	// A message rejected after the end of data ends the transaction, like an accepted one.
-	rejected := smtp.NewStatusS(554, smtp.EnhancedCode{5, 6, 0}, "rejected")
+	rejected := deltasmtp.NewStatusS(554, deltasmtp.EnhancedCode{5, 6, 0}, "rejected")
 	_, c, scanner := limitTestServer(t, &backend{rejectAfterOpen: rejected}, 50)
 
 	_, _ = io.WriteString(c, "DATA\r\n")
@@ -161,7 +161,7 @@ func TestServerLimit_Data_RejectedEndOfDataEndsTransaction(t *testing.T) {
 
 func TestServerLimit_Data_RejectedCommandKeepsTransaction(t *testing.T) {
 	// A DATA command rejected before 354 carried no message, the transaction stays open.
-	rejected := smtp.NewStatusS(554, smtp.EnhancedCode{5, 6, 0}, "rejected")
+	rejected := deltasmtp.NewStatusS(554, deltasmtp.EnhancedCode{5, 6, 0}, "rejected")
 	_, c, scanner := limitTestServer(t, &backend{dataErr: rejected}, 50)
 
 	_, _ = io.WriteString(c, "DATA\r\n")
@@ -174,7 +174,7 @@ func TestServerLimit_Data_RejectedCommandKeepsTransaction(t *testing.T) {
 }
 
 func TestServerLimit_Bdat_BackendRejectsWithoutReading(t *testing.T) {
-	rejected := smtp.NewStatusS(554, smtp.EnhancedCode{5, 6, 0}, "rejected")
+	rejected := deltasmtp.NewStatusS(554, deltasmtp.EnhancedCode{5, 6, 0}, "rejected")
 	be, c, scanner := limitTestServer(t, &backend{rejectAfterOpen: rejected}, 50)
 
 	payload := strings.Repeat("x", 60) + "\r\nNOOP\r\n"
@@ -184,7 +184,7 @@ func TestServerLimit_Bdat_BackendRejectsWithoutReading(t *testing.T) {
 }
 
 func TestServerLimit_Bdat_BackendRejectsWithinLimit(t *testing.T) {
-	rejected := smtp.NewStatusS(554, smtp.EnhancedCode{5, 6, 0}, "rejected")
+	rejected := deltasmtp.NewStatusS(554, deltasmtp.EnhancedCode{5, 6, 0}, "rejected")
 	_, c, scanner := limitTestServer(t, &backend{rejectAfterOpen: rejected}, 50)
 
 	_, _ = io.WriteString(c, "BDAT 6 LAST\r\nNOOP\r\n")
@@ -279,7 +279,7 @@ func TestServerLimit_Bdat_ExactLimit(t *testing.T) {
 // A backend may reject with 552 on its own (e.g. its own size policy) without
 // the server limit being hit. The stream is in sync, so the connection stays open.
 func TestServerLimit_Data_BackendOwnTooLarge(t *testing.T) {
-	_, c, scanner := limitTestServer(t, &backend{rejectAfterOpen: smtp.ErrDataTooLarge}, 50)
+	_, c, scanner := limitTestServer(t, &backend{rejectAfterOpen: deltasmtp.ErrDataTooLarge}, 50)
 
 	_, _ = io.WriteString(c, "DATA\r\n")
 	require.True(t, strings.HasPrefix(readReply(t, c, scanner), "354 "))
@@ -292,7 +292,7 @@ func TestServerLimit_Data_BackendOwnTooLarge(t *testing.T) {
 }
 
 func TestServerLimit_Bdat_BackendOwnTooLarge(t *testing.T) {
-	_, c, scanner := limitTestServer(t, &backend{rejectAfterOpen: smtp.ErrDataTooLarge}, 50)
+	_, c, scanner := limitTestServer(t, &backend{rejectAfterOpen: deltasmtp.ErrDataTooLarge}, 50)
 
 	_, _ = io.WriteString(c, "BDAT 6 LAST\r\nNOOP\r\n")
 	reply := readReply(t, c, scanner)

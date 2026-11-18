@@ -95,7 +95,7 @@ func (c *Conn) run() (err error) {
 		err = c.handle(cmd, arg)
 		if err != nil {
 			// if error is a smtp status it isn't necessary to close the connection
-			if smtpErr, ok := err.(*smtp.Status); ok {
+			if smtpErr, ok := err.(*deltasmtp.Status); ok {
 				// Service closing transmission channel, after quit
 				if smtpErr.Code == 221 {
 					return smtpErr
@@ -125,7 +125,7 @@ func (c *Conn) nextCommand() (cmd string, arg string, err error) {
 // Commands are dispatched to the appropriate handler functions.
 func (c *Conn) handle(cmd string, arg string) error {
 	if cmd == "" {
-		return smtp.ErrBadSyntax
+		return deltasmtp.ErrBadSyntax
 	}
 	switch c.state {
 	case stateInit, stateUpgrade:
@@ -148,13 +148,13 @@ func (c *Conn) handleStateInit(cmd string, arg string) error {
 	case "HELO", "EHLO":
 		return c.handleGreet(cmd == "EHLO", arg)
 	case "NOOP":
-		return smtp.Noop
+		return deltasmtp.Noop
 	case "VRFY":
 		return c.handleVrfy(arg)
 	case "RSET": // Reset session
 		return c.handleRSET()
 	case "QUIT":
-		return smtp.Quit
+		return deltasmtp.Quit
 	default:
 		return c.commandUnknown(cmd)
 	}
@@ -165,13 +165,13 @@ func (c *Conn) handleStateEnforceAuthentication(cmd string, arg string) error {
 	case "HELO", "EHLO":
 		return c.handleGreet(cmd == "EHLO", arg)
 	case "NOOP":
-		return smtp.Noop
+		return deltasmtp.Noop
 	case "VRFY":
 		return c.handleVrfy(arg)
 	case "RSET": // Reset session
 		return c.handleRSET()
 	case "QUIT":
-		return smtp.Quit
+		return deltasmtp.Quit
 	case "AUTH":
 		// there is always a mechanism, as it is an enforce authentication precondition
 		return c.handleAuth(arg)
@@ -181,7 +181,7 @@ func (c *Conn) handleStateEnforceAuthentication(cmd string, arg string) error {
 	case "BDAT":
 		return c.handleBdatDiscard(arg)
 	default:
-		return smtp.ErrAuthRequired
+		return deltasmtp.ErrAuthRequired
 	}
 }
 
@@ -192,18 +192,18 @@ func (c *Conn) handleStateGreeted(cmd string, arg string) error {
 	case "MAIL":
 		return c.handleMail(arg)
 	case "NOOP":
-		return smtp.Noop
+		return deltasmtp.Noop
 	case "VRFY":
 		return c.handleVrfy(arg)
 	case "RSET": // Reset session
 		return c.handleRSET()
 	case "QUIT":
-		return smtp.Quit
+		return deltasmtp.Quit
 	case "AUTH":
 		if len(c.client.mechanisms) > 0 {
 			return c.handleAuth(arg)
 		}
-		return smtp.ErrAuthUnsupported
+		return deltasmtp.ErrAuthUnsupported
 	case "STARTTLS":
 		return c.handleStartTLS()
 	// RFC 5321, always consume bdat data if capabilities were sent
@@ -221,7 +221,7 @@ func (c *Conn) handleStateMail(cmd string, arg string) error {
 	case "RCPT":
 		return c.handleRcpt(arg)
 	case "NOOP":
-		return smtp.Noop
+		return deltasmtp.Noop
 	case "VRFY":
 		return c.handleVrfy(arg)
 	case "RSET": // Reset session
@@ -234,7 +234,7 @@ func (c *Conn) handleStateMail(cmd string, arg string) error {
 	case "DATA":
 		return c.handleData(arg)
 	case "QUIT":
-		return smtp.Quit
+		return deltasmtp.Quit
 	case "STARTTLS":
 		return c.handleStartTLS()
 	default:
@@ -247,23 +247,24 @@ func (c *Conn) handleStateEnforceSecureConnection(cmd string, arg string) error 
 	case "HELO", "EHLO":
 		return c.handleGreet(cmd == "EHLO", arg)
 	case "NOOP":
-		return smtp.Noop
+		return deltasmtp.Noop
 	case "VRFY":
 		return c.handleVrfy(arg)
 	case "STARTTLS":
 		return c.handleStartTLS()
 	case "QUIT":
-		return smtp.Quit
+		return deltasmtp.Quit
 	// RFC 5321, always consume bdat data if capabilities were sent
 	case "BDAT":
 		return c.handleBdatDiscard(arg)
 	default:
-		return smtp.ErrSecureConnectionRequired
+		return deltasmtp.ErrSecureConnectionRequired
 	}
 }
 
-func (c *Conn) commandUnknown(cmd string) *smtp.Status {
-	return smtp.NewStatusS(502, smtp.EnhancedCode{5, 5, 1}, fmt.Sprintf("%s command unknown, state %d", cmd, c.state))
+func (c *Conn) commandUnknown(cmd string) *deltasmtp.Status {
+	return deltasmtp.NewStatusS(502, deltasmtp.EnhancedCode{5, 5, 1},
+		fmt.Sprintf("%s command unknown, state %d", cmd, c.state))
 }
 
 // Server returns the server this connection comes from.
@@ -338,7 +339,7 @@ func (c *Conn) handleRSET() error {
 	if err != nil {
 		return err
 	}
-	c.writeStatus(smtp.Reset)
+	c.writeStatus(deltasmtp.Reset)
 	return nil
 }
 
@@ -346,7 +347,7 @@ func (c *Conn) handleRSET() error {
 func (c *Conn) handleGreet(esmtp bool, arg string) error {
 	domain, err := parse.HelloArgument(arg)
 	if err != nil {
-		return smtp.ErrHeloArgRequired
+		return deltasmtp.ErrHeloArgRequired
 	}
 
 	// c.client.esmtp is populated before NewSession so
@@ -376,20 +377,20 @@ func (c *Conn) handleGreet(esmtp bool, arg string) error {
 	}
 
 	if !esmtp {
-		return smtp.NewStatusS(250, smtp.NoEnhancedCode, c.server.hostname+" greets "+c.client.helo)
+		return deltasmtp.NewStatusS(250, deltasmtp.NoEnhancedCode, c.server.hostname+" greets "+c.client.helo)
 	}
 
 	c.client.mechanisms = c.session.AuthMechanisms(c.ctx)
 
 	if len(c.client.mechanisms) == 0 && c.server.enforceAuthentication {
 		// without any auth mechanism, no authentication can happen => deadlock
-		return c.newStatusError(smtp.ErrNoAuthMechanism, err)
+		return c.newStatusError(deltasmtp.ErrNoAuthMechanism, err)
 	}
 
 	return c.handleGreetResponse()
 }
 
-func (c *Conn) handleGreetResponse() *smtp.Status {
+func (c *Conn) handleGreetResponse() *deltasmtp.Status {
 	isTLS := c.IsTLS()
 
 	// 17 lines is the current maximum
@@ -447,14 +448,14 @@ func (c *Conn) handleGreetResponse() *smtp.Status {
 		}
 	}
 	if c.server.enableMTPRIORITY {
-		if c.server.mtPriorityProfile != smtp.PriorityUnspecified {
+		if c.server.mtPriorityProfile != deltasmtp.PriorityUnspecified {
 			lines = append(lines, "MT-PRIORITY "+string(c.server.mtPriorityProfile))
 		} else {
 			lines = append(lines, "MT-PRIORITY")
 		}
 	}
 
-	return smtp.NewStatusM(250, smtp.NoEnhancedCode, lines)
+	return deltasmtp.NewStatusM(250, deltasmtp.NoEnhancedCode, lines)
 }
 
 // limits returns the RFC 9422 LIMITS parameters with a leading space, or ""
@@ -484,12 +485,12 @@ func (c *Conn) handleError(err error) {
 	}
 
 	if neterr, ok := err.(net.Error); ok && neterr.Timeout() {
-		c.writeStatus(smtp.ErrIdleTimeout)
+		c.writeStatus(deltasmtp.ErrIdleTimeout)
 		c.Close(fmt.Errorf("idle timeout: %w", err))
 		return
 	}
 
-	if smtpErr, ok := err.(*smtp.Status); ok {
+	if smtpErr, ok := err.(*deltasmtp.Status); ok {
 		c.writeStatus(smtpErr)
 
 		if smtpErr.Code != 221 {
@@ -502,24 +503,24 @@ func (c *Conn) handleError(err error) {
 	}
 
 	if errors.Is(err, errTooManyTransactions) {
-		c.writeStatus(smtp.ErrTooManyTransactions)
+		c.writeStatus(deltasmtp.ErrTooManyTransactions)
 		c.Close(err)
 		return
 	}
 
 	if errors.Is(err, errMessageTooLarge) {
-		c.writeStatus(smtp.ErrDataTooLarge)
+		c.writeStatus(deltasmtp.ErrDataTooLarge)
 		c.Close(err)
 		return
 	}
 
-	if err == smtp.ErrTooLongLine {
-		c.writeStatus(smtp.ErrCommandLineTooLong)
+	if err == deltasmtp.ErrTooLongLine {
+		c.writeStatus(deltasmtp.ErrCommandLineTooLong)
 		c.Close(errors.New("line too long"))
 		return
 	}
 
-	c.writeStatus(smtp.ErrConnection)
+	c.writeStatus(deltasmtp.ErrConnection)
 	c.Close(fmt.Errorf("unknown error: %w", err))
 }
 
@@ -546,20 +547,20 @@ func (c *Conn) handleMail(arg string) error {
 
 	arg, ok := parse.CutPrefixFold(arg, "FROM:")
 	if !ok {
-		return smtp.ErrMailSyntax
+		return deltasmtp.ErrMailSyntax
 	}
 
 	p := parse.Parser{S: strings.TrimSpace(arg)}
 	from, err := p.ReversePath()
 	if err != nil {
-		return c.newStatusError(smtp.ErrMailSyntax, err)
+		return c.newStatusError(deltasmtp.ErrMailSyntax, err)
 	}
 	args, err := parse.Args(p.S)
 	if err != nil {
-		return c.newStatusError(smtp.ErrMailParams, err)
+		return c.newStatusError(deltasmtp.ErrMailParams, err)
 	}
 
-	opts := &smtp.MailOptions{}
+	opts := &deltasmtp.MailOptions{}
 
 	c.tx = transaction{}
 	// This is where the Conn may put BODY=8BITMIME, but we already
@@ -569,72 +570,72 @@ func (c *Conn) handleMail(arg string) error {
 		case "SIZE":
 			size, err := strconv.ParseUint(arg.Value, 10, 32)
 			if err != nil {
-				return smtp.ErrMalformedSize
+				return deltasmtp.ErrMalformedSize
 			}
 
 			if c.server.maxMessageBytes > 0 && int64(size) > c.server.maxMessageBytes {
-				return smtp.ErrDataTooLarge
+				return deltasmtp.ErrDataTooLarge
 			}
 
 			opts.Size = int64(size)
 		case "XOORG":
 			value, err := decodeXtext(arg.Value)
 			if err != nil || value == "" {
-				return smtp.ErrMalformedXOORG
+				return deltasmtp.ErrMalformedXOORG
 			}
 			if !c.server.enableXOORG {
-				return smtp.ErrXOORGNotImplemented
+				return deltasmtp.ErrXOORGNotImplemented
 			}
 			opts.XOORG = &value
 		case "SMTPUTF8":
 			if !c.server.enableSMTPUTF8 {
-				return smtp.ErrSMTPUTF8NotImplemented
+				return deltasmtp.ErrSMTPUTF8NotImplemented
 			}
 			opts.UTF8 = true
 		case "REQUIRETLS":
 			if !c.server.enableREQUIRETLS {
-				return smtp.ErrREQUIRETLSNotImplemented
+				return deltasmtp.ErrREQUIRETLSNotImplemented
 			}
 			opts.RequireTLS = true
 		case "BODY":
 			value := strings.ToUpper(arg.Value)
-			switch smtp.BodyType(value) {
-			case smtp.BodyBinaryMIME:
+			switch deltasmtp.BodyType(value) {
+			case deltasmtp.BodyBinaryMIME:
 				if !c.server.enableBINARYMIME {
-					return smtp.ErrBINARYMIMENotImplemented
+					return deltasmtp.ErrBINARYMIMENotImplemented
 				}
 				c.tx.binarymime = true
-			case smtp.Body7Bit, smtp.Body8BitMIME:
+			case deltasmtp.Body7Bit, deltasmtp.Body8BitMIME:
 				// This space is intentionally left blank
 			default:
-				return smtp.ErrUnknownBody
+				return deltasmtp.ErrUnknownBody
 			}
-			opts.Body = smtp.BodyType(value)
+			opts.Body = deltasmtp.BodyType(value)
 		case "RET":
 			if !c.server.enableDSN {
-				return smtp.ErrRETNotImplemented
+				return deltasmtp.ErrRETNotImplemented
 			}
 			value := strings.ToUpper(arg.Value)
-			switch smtp.DSNReturn(value) {
-			case smtp.DSNReturnFull, smtp.DSNReturnHeaders:
+			switch deltasmtp.DSNReturn(value) {
+			case deltasmtp.DSNReturnFull, deltasmtp.DSNReturnHeaders:
 				// This space is intentionally left blank
 			default:
-				return smtp.ErrUnknownRET
+				return deltasmtp.ErrUnknownRET
 			}
-			opts.Return = smtp.DSNReturn(value)
+			opts.Return = deltasmtp.DSNReturn(value)
 		case "ENVID":
 			if !c.server.enableDSN {
-				return smtp.ErrENVIDNotImplemented
+				return deltasmtp.ErrENVIDNotImplemented
 			}
 			value, err := decodeXtext(arg.Value)
 			if err != nil || value == "" || !parse.IsPrintableASCII(value) {
-				return smtp.ErrMalformedENVID
+				return deltasmtp.ErrMalformedENVID
 			}
 			opts.EnvelopeID = value
 		case "AUTH":
 			value, err := decodeXtext(arg.Value)
 			if err != nil || value == "" {
-				return smtp.ErrMalformedAUTH
+				return deltasmtp.ErrMalformedAUTH
 			}
 			if value == "<>" {
 				value = ""
@@ -642,7 +643,7 @@ func (c *Conn) handleMail(arg string) error {
 				p := parse.Parser{S: value}
 				value, err = p.Mailbox()
 				if err != nil || p.S != "" {
-					return smtp.ErrMalformedAUTHMailbox
+					return deltasmtp.ErrMalformedAUTHMailbox
 				}
 			}
 			opts.Auth = &value
@@ -655,17 +656,17 @@ func (c *Conn) handleMail(arg string) error {
 				return err
 			}
 		default:
-			return smtp.ErrUnknownMailArg
+			return deltasmtp.ErrUnknownMailArg
 		}
 	}
 
 	if !opts.UTF8 && !parse.IsASCII(from) {
-		return smtp.ErrNonASCIISender
+		return deltasmtp.ErrNonASCIISender
 	}
 
 	// The null reverse-path is not an address.
 	if from != "" {
-		if err := c.validateAddress(from, smtp.ErrSenderNotAccepted); err != nil {
+		if err := c.validateAddress(from, deltasmtp.ErrSenderNotAccepted); err != nil {
 			return err
 		}
 	}
@@ -673,41 +674,41 @@ func (c *Conn) handleMail(arg string) error {
 	c.tx.smtputf8 = opts.UTF8
 
 	if err := c.session.Mail(c.ctx, from, opts); err != nil {
-		if smtpErr, ok := err.(*smtp.Status); ok {
+		if smtpErr, ok := err.(*deltasmtp.Status); ok {
 			// a positive response also counts as a success
 			if smtpErr.Positive() {
 				c.state = stateMail
 			}
 			return smtpErr
 		}
-		return c.newStatusError(smtp.ErrMailNotAccepted, err)
+		return c.newStatusError(deltasmtp.ErrMailNotAccepted, err)
 	}
 
 	c.state = stateMail
-	return smtp.NewStatusS(250, smtp.EnhancedCode{2, 0, 0}, fmt.Sprintf("Roger, accepting mail from <%v>", from))
+	return deltasmtp.NewStatusS(250, deltasmtp.EnhancedCode{2, 0, 0}, fmt.Sprintf("Roger, accepting mail from <%v>", from))
 }
 
-func handleMailBY(server *Server, opts *smtp.MailOptions, value string) error {
+func handleMailBY(server *Server, opts *deltasmtp.MailOptions, value string) error {
 	if !server.enableDELIVERBY {
-		return smtp.ErrDELIVERBYNotImplemented
+		return deltasmtp.ErrDELIVERBYNotImplemented
 	}
 	deliverBy := parseDeliverByArgument(value)
 	if deliverBy == nil {
-		return smtp.ErrMalformedBY
+		return deltasmtp.ErrMalformedBY
 	}
 	if server.minimumDeliverInSeconds != 0 &&
-		deliverBy.Mode == smtp.DeliverByReturn &&
+		deliverBy.Mode == deltasmtp.DeliverByReturn &&
 		deliverBy.Seconds < server.minimumDeliverInSeconds {
-		return smtp.ErrBYBelowMinimum
+		return deltasmtp.ErrBYBelowMinimum
 	}
 	opts.DeliverBy = deliverBy
 	return nil
 }
 
 // validateAddress calls the address validator of the server, if set.
-// If it returns an error that is not a negative *smtp.Status, the reply is
+// If it returns an error that is not a negative *deltasmtp.Status, the reply is
 // rejected, a 553 (mailbox name not allowed, RFC 5321 section 4.2.2).
-func (c *Conn) validateAddress(addr string, rejected *smtp.Status) error {
+func (c *Conn) validateAddress(addr string, rejected *deltasmtp.Status) error {
 	if c.server.addressValidator == nil {
 		return nil
 	}
@@ -717,7 +718,7 @@ func (c *Conn) validateAddress(addr string, rejected *smtp.Status) error {
 		return nil
 	}
 
-	if status, ok := err.(*smtp.Status); ok && status.Positive() {
+	if status, ok := err.(*deltasmtp.Status); ok && status.Positive() {
 		// A positive reply would end the command without a result.
 		err = errors.New("address validator returned a positive reply")
 	}
@@ -725,16 +726,16 @@ func (c *Conn) validateAddress(addr string, rejected *smtp.Status) error {
 	return c.newStatusError(rejected, err)
 }
 
-func handleMailMTPRIORITY(server *Server, opts *smtp.MailOptions, value string) error {
+func handleMailMTPRIORITY(server *Server, opts *deltasmtp.MailOptions, value string) error {
 	if !server.enableMTPRIORITY {
-		return smtp.ErrMTPRIORITYNotImplemented
+		return deltasmtp.ErrMTPRIORITYNotImplemented
 	}
 	mtPriority, err := strconv.Atoi(value)
 	if err != nil {
-		return smtp.ErrMalformedMTPRIORITY
+		return deltasmtp.ErrMalformedMTPRIORITY
 	}
 	if mtPriority < -9 || mtPriority > 9 {
-		return smtp.ErrMTPRIORITYOutOfRange
+		return deltasmtp.ErrMTPRIORITYOutOfRange
 	}
 	opts.MTPriority = &mtPriority
 	return nil
@@ -744,34 +745,34 @@ func handleMailMTPRIORITY(server *Server, opts *smtp.MailOptions, value string) 
 func (c *Conn) handleRcpt(arg string) error {
 	arg, ok := parse.CutPrefixFold(arg, "TO:")
 	if !ok {
-		return smtp.ErrRcptSyntax
+		return deltasmtp.ErrRcptSyntax
 	}
 
 	p := parse.Parser{S: strings.TrimSpace(arg)}
 	recipient, err := p.Path()
 	if err != nil {
-		return smtp.ErrRcptSyntax
+		return deltasmtp.ErrRcptSyntax
 	}
 	if !c.tx.smtputf8 && !parse.IsASCII(recipient) {
-		return smtp.ErrNonASCIIRecipient
+		return deltasmtp.ErrNonASCIIRecipient
 	}
 
-	if err := c.validateAddress(recipient, smtp.ErrRcptAddressNotAccepted); err != nil {
+	if err := c.validateAddress(recipient, deltasmtp.ErrRcptAddressNotAccepted); err != nil {
 		return err
 	}
 
 	if c.server.maxRecipients > 0 && c.tx.recipients >= c.server.maxRecipients {
-		return smtp.NewStatusS(452, smtp.EnhancedCode{4, 5, 3},
+		return deltasmtp.NewStatusS(452, deltasmtp.EnhancedCode{4, 5, 3},
 			fmt.Sprintf("Maximum limit of %v recipients reached", c.server.maxRecipients),
 		)
 	}
 
 	args, err := parse.Args(p.S)
 	if err != nil {
-		return c.newStatusError(smtp.ErrRcptParams, err)
+		return c.newStatusError(deltasmtp.ErrRcptParams, err)
 	}
 
-	opts := &smtp.RcptOptions{}
+	opts := &deltasmtp.RcptOptions{}
 
 	for _, arg := range args {
 		switch arg.Key {
@@ -788,61 +789,62 @@ func (c *Conn) handleRcpt(arg string) error {
 				return err
 			}
 		default:
-			return smtp.ErrUnknownRcptArg
+			return deltasmtp.ErrUnknownRcptArg
 		}
 	}
 
 	if err := c.session.Rcpt(c.ctx, recipient, opts); err != nil {
-		if smtpErr, ok := err.(*smtp.Status); ok {
+		if smtpErr, ok := err.(*deltasmtp.Status); ok {
 			// a positive response also counts as a success
 			if smtpErr.Positive() {
 				c.tx.recipients++
 			}
 			return smtpErr
 		}
-		return c.newStatusError(smtp.ErrRcptNotAccepted, err)
+		return c.newStatusError(deltasmtp.ErrRcptNotAccepted, err)
 	}
 
 	c.tx.recipients++
-	return smtp.NewStatusS(250, smtp.EnhancedCode{2, 0, 0}, fmt.Sprintf("I'll make sure <%v> gets this", recipient))
+	return deltasmtp.NewStatusS(250, deltasmtp.EnhancedCode{2, 0, 0},
+		fmt.Sprintf("I'll make sure <%v> gets this", recipient))
 }
 
-func handleRcptNotify(server *Server, opts *smtp.RcptOptions, value string) error {
+func handleRcptNotify(server *Server, opts *deltasmtp.RcptOptions, value string) error {
 	if !server.enableDSN {
-		return smtp.ErrNOTIFYNotImplemented
+		return deltasmtp.ErrNOTIFYNotImplemented
 	}
-	notify := []smtp.DSNNotify{}
+	notify := []deltasmtp.DSNNotify{}
 	for val := range strings.SplitSeq(value, ",") {
-		notify = append(notify, smtp.DSNNotify(strings.ToUpper(val)))
+		notify = append(notify, deltasmtp.DSNNotify(strings.ToUpper(val)))
 	}
 	if err := parse.CheckNotifySet(notify); err != nil {
-		return smtp.ErrMalformedNOTIFY
+		return deltasmtp.ErrMalformedNOTIFY
 	}
 	opts.Notify = notify
 	return nil
 }
 
-func handleRcptORCPT(server *Server, opts *smtp.RcptOptions, value string) error {
+func handleRcptORCPT(server *Server, opts *deltasmtp.RcptOptions, value string) error {
 	if !server.enableDSN {
-		return smtp.ErrORCPTNotImplemented
+		return deltasmtp.ErrORCPTNotImplemented
 	}
 	aType, aAddr, err := decodeTypedAddress(value)
 	if err != nil || aAddr == "" {
-		return smtp.ErrMalformedORCPT
+		return deltasmtp.ErrMalformedORCPT
 	}
 	opts.OriginalRecipientType = aType
 	opts.OriginalRecipient = aAddr
 	return nil
 }
 
-func handleRcptRRVS(server *Server, opts *smtp.RcptOptions, value string) error {
+func handleRcptRRVS(server *Server, opts *deltasmtp.RcptOptions, value string) error {
 	if !server.enableRRVS {
-		return smtp.ErrRRVSNotImplemented
+		return deltasmtp.ErrRRVSNotImplemented
 	}
 	value, _, _ = strings.Cut(value, ";") // discard the no-support action
 	rrvsTime, err := time.Parse(time.RFC3339, value)
 	if err != nil {
-		return smtp.ErrMalformedRRVS
+		return deltasmtp.ErrMalformedRRVS
 	}
 	opts.RequireRecipientValidSince = rrvsTime
 	return nil
@@ -852,35 +854,35 @@ func (c *Conn) handleVrfy(arg string) error {
 	p := parse.Parser{S: strings.TrimSpace(arg)}
 	vrfy, err := p.Path()
 	if err != nil {
-		return smtp.ErrVrfySyntax
+		return deltasmtp.ErrVrfySyntax
 	}
 	args, err := parse.Args(p.S)
 	if err != nil {
-		return c.newStatusError(smtp.ErrVrfyParams, err)
+		return c.newStatusError(deltasmtp.ErrVrfyParams, err)
 	}
 
-	opts := &smtp.VrfyOptions{}
+	opts := &deltasmtp.VrfyOptions{}
 
 	for _, arg := range args {
 		if arg.Key == "SMTPUTF8" {
 			if !c.server.enableSMTPUTF8 {
-				return smtp.ErrSMTPUTF8NotImplemented
+				return deltasmtp.ErrSMTPUTF8NotImplemented
 			}
 			opts.UTF8 = true
 		}
 	}
 	if !opts.UTF8 && !parse.IsASCII(vrfy) {
-		return smtp.ErrUTF8ReplyRequired
+		return deltasmtp.ErrUTF8ReplyRequired
 	}
 
-	if err := c.validateAddress(vrfy, smtp.ErrVrfyAddressNotAccepted); err != nil {
+	if err := c.validateAddress(vrfy, deltasmtp.ErrVrfyAddressNotAccepted); err != nil {
 		return err
 	}
 
 	res := c.session.Verify(c.ctx, vrfy, opts)
 
 	if res == nil {
-		return smtp.VRFY
+		return deltasmtp.VRFY
 	}
 
 	return res
@@ -888,18 +890,18 @@ func (c *Conn) handleVrfy(arg string) error {
 
 func (c *Conn) handleAuth(arg string) error {
 	if c.client.didAuth {
-		return smtp.ErrAlreadyAuthenticated
+		return deltasmtp.ErrAlreadyAuthenticated
 	}
 	parts := strings.Fields(arg)
 	if len(parts) == 0 {
-		return smtp.ErrAuthMissingParam
+		return deltasmtp.ErrAuthMissingParam
 	}
 
 	mechanism := strings.ToUpper(parts[0])
 
 	// Is mechanism allowed?
 	if !slices.Contains(c.client.mechanisms, mechanism) {
-		return smtp.ErrAuthUnknownMechanism
+		return deltasmtp.ErrAuthUnknownMechanism
 	}
 
 	// Parse client initial response if there is one
@@ -908,24 +910,24 @@ func (c *Conn) handleAuth(arg string) error {
 		var err error
 		ir, err = decodeSASLResponse(parts[1])
 		if err != nil {
-			return smtp.ErrInvalidBase64
+			return deltasmtp.ErrInvalidBase64
 		}
 	}
 
 	sasl, err := c.session.Auth(c.ctx, mechanism)
 	if err != nil {
-		return c.newStatusError(smtp.ErrAuthTemporaryFailure, err)
+		return c.newStatusError(deltasmtp.ErrAuthTemporaryFailure, err)
 	}
 
 	if sasl == nil {
-		return c.newStatusError(smtp.ErrNoAuthHandler, err)
+		return c.newStatusError(deltasmtp.ErrNoAuthHandler, err)
 	}
 
 	response := ir
 	for {
 		challenge, done, err := sasl.Next(response)
 		if err != nil {
-			return c.newStatusError(smtp.ErrAuthTemporaryFailure, err)
+			return c.newStatusError(deltasmtp.ErrAuthTemporaryFailure, err)
 		}
 
 		if done {
@@ -936,7 +938,7 @@ func (c *Conn) handleAuth(arg string) error {
 		if len(challenge) > 0 {
 			encoded = base64.StdEncoding.EncodeToString(challenge)
 		}
-		c.writeStatus(smtp.NewStatusS(334, smtp.NoEnhancedCode, encoded))
+		c.writeStatus(deltasmtp.NewStatusS(334, deltasmtp.NoEnhancedCode, encoded))
 
 		c.renewReadDeadline()
 		encoded, err = c.readLine()
@@ -946,12 +948,12 @@ func (c *Conn) handleAuth(arg string) error {
 
 		if encoded == "*" {
 			// https://tools.ietf.org/html/rfc4954#page-4
-			return smtp.ErrAuthCancelled
+			return deltasmtp.ErrAuthCancelled
 		}
 
 		response, err = decodeSASLResponse(encoded)
 		if err != nil {
-			return smtp.ErrInvalidBase64
+			return deltasmtp.ErrInvalidBase64
 		}
 	}
 
@@ -960,28 +962,28 @@ func (c *Conn) handleAuth(arg string) error {
 		c.state = stateGreeted
 	}
 
-	return smtp.AuthSucceeded
+	return deltasmtp.AuthSucceeded
 }
 
 func (c *Conn) handleStartTLS() error {
 	if _, isTLS := c.TLSConnectionState(); isTLS {
-		return smtp.ErrAlreadyTLS
+		return deltasmtp.ErrAlreadyTLS
 	}
 
 	if c.server.tlsConfig == nil {
-		return smtp.ErrTLSNotSupported
+		return deltasmtp.ErrTLSNotSupported
 	}
 
 	// allow the session to change tlsConfig
 	tlsConfig, err := c.session.STARTTLS(c.ctx, c.server.tlsConfig)
 	if err != nil {
-		return c.newStatusError(smtp.ErrTLSConfig, err)
+		return c.newStatusError(deltasmtp.ErrTLSConfig, err)
 	}
 	if tlsConfig == nil {
-		return smtp.ErrTLSConfigNil
+		return deltasmtp.ErrTLSConfigNil
 	}
 
-	c.writeStatus(smtp.StartTLS)
+	c.writeStatus(deltasmtp.StartTLS)
 
 	// Upgrade to TLS
 	tlsConn := tls.Server(c.conn, tlsConfig)
@@ -1010,14 +1012,14 @@ func (c *Conn) handleStartTLS() error {
 func (c *Conn) handleData(arg string) error {
 	// at least a single recipient needs to be set
 	if c.tx.recipients == 0 {
-		return smtp.ErrNoRecipients
+		return deltasmtp.ErrNoRecipients
 	}
 
 	if arg != "" {
-		return smtp.ErrDataArgs
+		return deltasmtp.ErrDataArgs
 	}
 	if c.tx.binarymime {
-		return smtp.ErrDataBINARYMIME
+		return deltasmtp.ErrDataBINARYMIME
 	}
 
 	var r io.Reader
@@ -1027,7 +1029,7 @@ func (c *Conn) handleData(arg string) error {
 			return r
 		}
 		// We have recipients, go to accept data
-		c.writeStatus(smtp.StartMailInput)
+		c.writeStatus(deltasmtp.StartMailInput)
 		c.setDataDeadline()
 
 		// r gets exposed to be able to discard the rest of the message
@@ -1038,7 +1040,7 @@ func (c *Conn) handleData(arg string) error {
 	uuid, err := c.session.Data(c.ctx, rstart)
 
 	// an error which isn't a smtp status error will always terminate the connection
-	if _, ok := err.(*smtp.Status); err != nil && !ok {
+	if _, ok := err.(*deltasmtp.Status); err != nil && !ok {
 		return err
 	}
 
@@ -1047,7 +1049,7 @@ func (c *Conn) handleData(arg string) error {
 	// detects a breach the backend swallowed. In that case the rest of the message is
 	// still on the wire and the connection can't be resynchronised.
 	if r != nil {
-		if _, discardErr := io.Copy(io.Discard, r); errors.Is(discardErr, smtp.ErrDataTooLarge) {
+		if _, discardErr := io.Copy(io.Discard, r); errors.Is(discardErr, deltasmtp.ErrDataTooLarge) {
 			return errMessageTooLarge
 		}
 	}
@@ -1090,9 +1092,9 @@ func (c *Conn) handleBdatDiscard(arg string) error {
 		return err
 	}
 	if !c.server.enableCHUNKING {
-		return smtp.ErrCHUNKINGNotImplemented
+		return deltasmtp.ErrCHUNKINGNotImplemented
 	}
-	return smtp.ErrBadSequence
+	return deltasmtp.ErrBadSequence
 }
 
 func (c *Conn) handleBdat(arg string) error {
@@ -1110,7 +1112,7 @@ func (c *Conn) handleBdat(arg string) error {
 		if err = c.discardBdat(size); err != nil {
 			return err
 		}
-		return smtp.ErrNoRecipients
+		return deltasmtp.ErrNoRecipients
 	}
 
 	closed := false
@@ -1120,7 +1122,7 @@ func (c *Conn) handleBdat(arg string) error {
 		if closed {
 			return "", "", io.EOF
 		}
-		c.writeStatus(smtp.BDATContinue)
+		c.writeStatus(deltasmtp.BDATContinue)
 		return c.nextCommand()
 	})
 
@@ -1128,7 +1130,7 @@ func (c *Conn) handleBdat(arg string) error {
 		return data
 	})
 
-	smtpErr, isStatus := err.(*smtp.Status)
+	smtpErr, isStatus := err.(*deltasmtp.Status)
 
 	// an error which isn't a SMTPStatus error will always terminate the connection
 	if err != nil && !isStatus {
@@ -1151,7 +1153,7 @@ func (c *Conn) handleBdat(arg string) error {
 	// The reader keeps returning ErrDataTooLarge once the limit is hit, so this also
 	// detects a breach the backend swallowed. In that case the chunk is still on the
 	// wire and the connection can't be resynchronised.
-	if _, discardErr := io.Copy(io.Discard, data); errors.Is(discardErr, smtp.ErrDataTooLarge) {
+	if _, discardErr := io.Copy(io.Discard, data); errors.Is(discardErr, deltasmtp.ErrDataTooLarge) {
 		return errMessageTooLarge
 	}
 
@@ -1167,25 +1169,25 @@ func (c *Conn) handleBdat(arg string) error {
 	return c.accepted(queueid)
 }
 
-func (*Conn) accepted(queueid string) *smtp.Status {
+func (*Conn) accepted(queueid string) *deltasmtp.Status {
 	if queueid != "" {
 		// limit length if queueid is too long (< 1000)
 		if len(queueid) > 977 {
 			queueid = queueid[:974] + "..."
 		}
-		return smtp.NewStatusS(250, smtp.EnhancedCode{2, 0, 0}, "OK: queued as "+queueid)
+		return deltasmtp.NewStatusS(250, deltasmtp.EnhancedCode{2, 0, 0}, "OK: queued as "+queueid)
 	}
-	return smtp.Queued
+	return deltasmtp.Queued
 }
 
 func (c *Conn) greet() {
 	protocol := "ESMTP"
 	c.writeStatus(
-		smtp.NewStatusS(220, smtp.NoEnhancedCode, fmt.Sprintf("%v %s Service Ready", c.server.hostname, protocol)),
+		deltasmtp.NewStatusS(220, deltasmtp.NoEnhancedCode, fmt.Sprintf("%v %s Service Ready", c.server.hostname, protocol)),
 	)
 }
 
-func (c *Conn) writeStatus(status *smtp.Status) {
+func (c *Conn) writeStatus(status *deltasmtp.Status) {
 	c.logger().DebugContext(
 		c.ctx, "write status", slog.Any("status", status),
 	)
@@ -1209,8 +1211,8 @@ func (c *Conn) writeStatus(status *smtp.Status) {
 }
 
 // newStatusError returns err if it is a status, otherwise it logs err and returns status.
-func (c *Conn) newStatusError(status *smtp.Status, err error) *smtp.Status {
-	if smtpErr, ok := err.(*smtp.Status); ok {
+func (c *Conn) newStatusError(status *deltasmtp.Status, err error) *deltasmtp.Status {
+	if smtpErr, ok := err.(*deltasmtp.Status); ok {
 		return smtpErr
 	}
 	c.logger().ErrorContext(c.ctx, status.Text(), slog.Any("err", err))

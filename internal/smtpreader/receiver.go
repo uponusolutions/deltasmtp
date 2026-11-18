@@ -75,7 +75,7 @@ func (t *Receiver) ReadFullLine() (string, error) {
 //	message line 2
 //	...
 //	code message line n
-func (t *Receiver) ReadResponse() (*smtp.Status, error) {
+func (t *Receiver) ReadResponse() (*deltasmtp.Status, error) {
 	status, continued, err := t.readFirstCodeLine()
 	if err != nil {
 		return nil, err
@@ -109,7 +109,7 @@ func (t *Receiver) ReadResponseValid(expectCode int) error {
 	return nil
 }
 
-func (t *Receiver) readResponseExtra(status *smtp.Status, continued bool, appendMessage bool) error {
+func (t *Receiver) readResponseExtra(status *deltasmtp.Status, continued bool, appendMessage bool) error {
 	var message string
 	var err error
 
@@ -129,7 +129,7 @@ func (t *Receiver) readResponseExtra(status *smtp.Status, continued bool, append
 	return nil
 }
 
-func (t *Receiver) readFirstCodeLine() (*smtp.Status, bool, error) {
+func (t *Receiver) readFirstCodeLine() (*deltasmtp.Status, bool, error) {
 	line, err := t.ReadFullLine()
 	if err != nil {
 		return nil, false, err
@@ -137,7 +137,7 @@ func (t *Receiver) readFirstCodeLine() (*smtp.Status, bool, error) {
 	return parseFirstCodeLine(line)
 }
 
-func parseFirstCodeLine(line string) (*smtp.Status, bool, error) {
+func parseFirstCodeLine(line string) (*deltasmtp.Status, bool, error) {
 	if len(line) < 4 || line[3] != ' ' && line[3] != '-' {
 		return nil, false, textproto.ProtocolError(fmt.Sprintf("short response: %q", line))
 	}
@@ -150,21 +150,21 @@ func parseFirstCodeLine(line string) (*smtp.Status, bool, error) {
 
 	// all 2xx, 4xx, and 5xx response lines
 	if code >= 300 && code < 400 {
-		return smtp.NewStatusS(code, smtp.NoEnhancedCode, message), continued, nil
+		return deltasmtp.NewStatusS(code, deltasmtp.NoEnhancedCode, message), continued, nil
 	}
 
 	index := strings.Index(message, " ")
 	if index == -1 {
-		return smtp.NewStatusS(code, smtp.NoEnhancedCode, message), continued, nil
+		return deltasmtp.NewStatusS(code, deltasmtp.NoEnhancedCode, message), continued, nil
 	}
 	enhCode, err := parseEnhancedCode(message[:index], code)
 	if err != nil {
-		return smtp.NewStatusS(code, smtp.NoEnhancedCode, message), continued, nil
+		return deltasmtp.NewStatusS(code, deltasmtp.NoEnhancedCode, message), continued, nil
 	}
 
 	message = message[index+1:]
 
-	return smtp.NewStatusS(code, enhCode, message), continued, nil
+	return deltasmtp.NewStatusS(code, enhCode, message), continued, nil
 }
 
 func (t *Receiver) readExtraCodeLine(codeString string, enhCodePart []byte) (continued bool, message string, err error) {
@@ -194,13 +194,13 @@ func parseExtraCodeLine(line string, codeString string, enhCodePart []byte) (boo
 //	detail      = 1*3digit          ; without leading zeros
 //
 // Anything else isn't an enhanced code, but the start of the reply text.
-func parseEnhancedCode(s string, replyCode int) (smtp.EnhancedCode, error) {
+func parseEnhancedCode(s string, replyCode int) (deltasmtp.EnhancedCode, error) {
 	parts := strings.Split(s, ".")
 	if len(parts) != 3 {
-		return smtp.NoEnhancedCode, errors.New("wrong amount of enhanced code parts")
+		return deltasmtp.NoEnhancedCode, errors.New("wrong amount of enhanced code parts")
 	}
 
-	code := smtp.NoEnhancedCode
+	code := deltasmtp.NoEnhancedCode
 	for i, part := range parts {
 		maxDigits := 3
 		if i == 0 {
@@ -208,13 +208,13 @@ func parseEnhancedCode(s string, replyCode int) (smtp.EnhancedCode, error) {
 		}
 		if len(part) == 0 || len(part) > maxDigits || len(part) > 1 && part[0] == '0' ||
 			strings.IndexFunc(part, func(r rune) bool { return r < '0' || r > '9' }) != -1 {
-			return smtp.NoEnhancedCode, fmt.Errorf("invalid enhanced code part %q", part)
+			return deltasmtp.NoEnhancedCode, fmt.Errorf("invalid enhanced code part %q", part)
 		}
 		code[i], _ = strconv.Atoi(part)
 	}
 
 	if code[0] != replyCode/100 || code[0] != 2 && code[0] != 4 && code[0] != 5 {
-		return smtp.NoEnhancedCode, fmt.Errorf("enhanced code class %d doesn't match reply code %d", code[0], replyCode)
+		return deltasmtp.NoEnhancedCode, fmt.Errorf("enhanced code class %d doesn't match reply code %d", code[0], replyCode)
 	}
 	return code, nil
 }
@@ -233,7 +233,7 @@ func IsCodeUnexpected(code int, expectCode int) bool {
 func (t *Receiver) readLineSlice() ([]byte, error) {
 	// If the line limit was exceeded once, the connection shouldn't be used anymore.
 	if t.lineLengthExceeded {
-		return nil, smtp.ErrTooLongLine
+		return nil, deltasmtp.ErrTooLongLine
 	}
 
 	var line []byte
@@ -245,7 +245,7 @@ func (t *Receiver) readLineSlice() ([]byte, error) {
 
 		if t.maxLineLength > 0 && len(l)+len(line) > t.maxLineLength {
 			t.lineLengthExceeded = true
-			return nil, smtp.ErrTooLongLine
+			return nil, deltasmtp.ErrTooLongLine
 		}
 
 		// Avoid the copy if the first call produced a full line.

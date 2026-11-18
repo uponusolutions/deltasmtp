@@ -1,5 +1,5 @@
 // Package client implements the client of the Simple Mail Transfer Protocol as defined in RFC 5321.
-// It provides basic functionality you need to use smtp.
+// It provides basic functionality you need to use deltasmtp.
 //
 // It also implements the following extensions:
 //
@@ -116,7 +116,7 @@ type MailOptions struct {
 	UTF8 UTF8
 
 	// Value of RET= argument, FULL or HDRS.
-	Return smtp.DSNReturn
+	Return deltasmtp.DSNReturn
 
 	// Envelope identifier set by the client.
 	EnvelopeID string
@@ -134,7 +134,7 @@ type MailOptions struct {
 	Auth *string
 
 	// Value of BY= argument or nil if unset.
-	DeliverBy *smtp.DeliverByOptions
+	DeliverBy *deltasmtp.DeliverByOptions
 
 	// Value of MT-PRIORITY= or nil if unset.
 	MTPriority *int
@@ -236,10 +236,10 @@ func (c *Client) Close() (err error) {
 
 // receiveResponse reads a reply.
 //
-// Any error other than an *smtp.Status reply (e.g. a malformed or too long reply,
+// Any error other than an *deltasmtp.Status reply (e.g. a malformed or too long reply,
 // a timeout) may leave the rest of the reply unread. The next command would read
 // it as its own reply, so the connection is closed.
-func (c *Client) receiveResponse() (*smtp.Status, error) {
+func (c *Client) receiveResponse() (*deltasmtp.Status, error) {
 	status, err := c.receiver.ReadResponse()
 	if err != nil {
 		_ = c.Close()
@@ -251,7 +251,7 @@ func (c *Client) receiveResponse() (*smtp.Status, error) {
 // The connection is closed like in receiveResponse.
 func (c *Client) receiveResponseValid(expectCode int) error {
 	err := c.receiver.ReadResponseValid(expectCode)
-	if _, ok := err.(*smtp.Status); err != nil && !ok {
+	if _, ok := err.(*deltasmtp.Status); err != nil && !ok {
 		_ = c.Close()
 	}
 	return err
@@ -294,7 +294,7 @@ func (c *Client) Hello() error {
 
 	err := c.ehlo()
 
-	if status, ok := err.(*smtp.Status); err != nil && (ok && (status.Code == 500 || status.Code == 502)) {
+	if status, ok := err.(*deltasmtp.Status); err != nil && (ok && (status.Code == 500 || status.Code == 502)) {
 		// The server doesn't support EHLO, fallback to HELO
 		err = c.helo()
 	}
@@ -334,7 +334,7 @@ func (c *Client) consumeResponse() error {
 
 // cmd is a convenience function that sends a command and returns the response
 // does not support or handle anything related to pipelining
-func (c *Client) cmd(expectCode int, message string) (*smtp.Status, error) {
+func (c *Client) cmd(expectCode int, message string) (*deltasmtp.Status, error) {
 	if c.conn == nil {
 		return nil, ErrNotConnected
 	}
@@ -346,7 +346,7 @@ func (c *Client) cmd(expectCode int, message string) (*smtp.Status, error) {
 		return nil, err
 	}
 
-	_, err = c.sender.Write(smtp.Crnl)
+	_, err = c.sender.Write(deltasmtp.Crnl)
 	if err != nil {
 		return nil, err
 	}
@@ -412,7 +412,7 @@ func (c *Client) cmdValid(pType pipeliningType, expectCode int, message string) 
 		return err
 	}
 
-	_, err = c.sender.Write(smtp.Crnl)
+	_, err = c.sender.Write(deltasmtp.Crnl)
 	if err != nil {
 		return err
 	}
@@ -592,7 +592,7 @@ func (c *Client) PipeliningActive() bool {
 // does not necessarily indicate an invalid address. Many servers
 // will not verify addresses for security reasons.
 //
-// If server returns an error, it will be of type *smtp.
+// If server returns an error, it will be of type *deltasmtp.
 func (c *Client) Verify(addr string, opts *VrfyOptions) error {
 	if err := validateLine(addr); err != nil {
 		return err
@@ -623,7 +623,7 @@ func (c *Client) VerifyResponse() error {
 // Auth authenticates a client using the provided authentication mechanism.
 // Only servers that advertise the AUTH extension support this function.
 //
-// If server returns an error, it will be of type *smtp.
+// If server returns an error, it will be of type *deltasmtp.
 func (c *Client) Auth(saslClient sasl.Client) error {
 	if c.PipeliningActive() && c.connPipelining.pending > 0 {
 		return ErrPipeliningNoPendingRequired
@@ -646,7 +646,7 @@ func (c *Client) Auth(saslClient sasl.Client) error {
 		resp64 = []byte{'='}
 	}
 
-	var status *smtp.Status
+	var status *deltasmtp.Status
 
 	// 512 - len("AUTH") - 2 * len(" ") - len(\r\n)
 	if len(mech)+len(resp64) > 504 || len(resp64) == 0 {
@@ -715,7 +715,7 @@ func (c *Client) authAbort(err error) error {
 // If opts is not nil, MAIL arguments provided in the structure will be added
 // to the command. Handling of unsupported options depends on the extension.
 //
-// If server returns an error, it will be of type *smtp.
+// If server returns an error, it will be of type *deltasmtp.
 // nolint:revive
 func (c *Client) Mail(from string, opts *MailOptions) error {
 	if err := validateLine(from); err != nil {
@@ -748,7 +748,7 @@ func (c *Client) Mail(from string, opts *MailOptions) error {
 	}
 	if _, ok := c.connExt["DSN"]; ok && opts != nil {
 		switch opts.Return {
-		case smtp.DSNReturnFull, smtp.DSNReturnHeaders:
+		case deltasmtp.DSNReturnFull, deltasmtp.DSNReturnHeaders:
 			fmt.Fprintf(&sb, " RET=%s", string(opts.Return))
 		case "":
 			// This space is intentionally left blank
@@ -776,11 +776,11 @@ func (c *Client) Mail(from string, opts *MailOptions) error {
 		// We can safely discard parameter if server does not support AUTH.
 	}
 	if _, ok := c.connExt["DELIVERBY"]; ok && opts != nil && opts.DeliverBy != nil {
-		if opts.DeliverBy.Mode == smtp.DeliverByReturn &&
+		if opts.DeliverBy.Mode == deltasmtp.DeliverByReturn &&
 			(opts.DeliverBy.Seconds < 1 || opts.DeliverBy.Seconds > 999999999) {
 			return errors.New("smtp: DELIVERBY mode must be between 1 and 999999999 with return mode")
 		}
-		if opts.DeliverBy.Mode == smtp.DeliverByNotify &&
+		if opts.DeliverBy.Mode == deltasmtp.DeliverByNotify &&
 			(opts.DeliverBy.Seconds < -999999999 || opts.DeliverBy.Seconds > 999999999) {
 			return errors.New("smtp: DELIVERBY mode must be between -999999999 and 999999999 with notify mode")
 		}
@@ -811,8 +811,8 @@ func (c *Client) MailResponse() error {
 // If opts is not nil, RCPT arguments provided in the structure will be added
 // to the command. Handling of unsupported options depends on the extension.
 //
-// If server returns an error, it will be of type *smtp.
-func (c *Client) Rcpt(to string, opts *smtp.RcptOptions) error {
+// If server returns an error, it will be of type *deltasmtp.
+func (c *Client) Rcpt(to string, opts *deltasmtp.RcptOptions) error {
 	if err := validateLine(to); err != nil {
 		return err
 	}
@@ -836,7 +836,7 @@ func (c *Client) RcptResponse() error {
 	return c.readResponseValid(25)
 }
 
-func rcptDSN(sb *strings.Builder, opts *smtp.RcptOptions, ext map[string]string) error {
+func rcptDSN(sb *strings.Builder, opts *deltasmtp.RcptOptions, ext map[string]string) error {
 	if len(opts.Notify) != 0 {
 		sb.WriteString(" NOTIFY=")
 		if err := parse.CheckNotifySet(opts.Notify); err != nil {
@@ -852,12 +852,12 @@ func rcptDSN(sb *strings.Builder, opts *smtp.RcptOptions, ext map[string]string)
 	if opts.OriginalRecipient != "" {
 		var enc string
 		switch opts.OriginalRecipientType {
-		case smtp.DSNAddressTypeRFC822:
+		case deltasmtp.DSNAddressTypeRFC822:
 			if !parse.IsPrintableASCII(opts.OriginalRecipient) {
 				return errors.New("smtp: Illegal address")
 			}
 			enc = encodeXtext(opts.OriginalRecipient)
-		case smtp.DSNAddressTypeUTF8:
+		case deltasmtp.DSNAddressTypeUTF8:
 			if _, ok := ext["SMTPUTF8"]; ok {
 				enc = encodeUTF8AddrUnitext(opts.OriginalRecipient)
 			} else {
@@ -877,7 +877,7 @@ func rcptDSN(sb *strings.Builder, opts *smtp.RcptOptions, ext map[string]string)
 // close the writer before calling any more methods on c. A call to
 // Data must be preceded by one or more calls to Rcpt.
 //
-// If server returns an error, it will be of type *smtp.
+// If server returns an error, it will be of type *deltasmtp.
 func (c *Client) Content(size int) (*ContentCloser, error) {
 	if _, ok := c.connExt["CHUNKING"]; c.cfg.chunking && ok {
 		if c.PipeliningActive() {
@@ -901,7 +901,7 @@ func (c *Client) ContentResponse(size int) (*ContentCloser, error) {
 // close the writer before calling any more methods on c. A call to
 // Data must be preceded by one or more calls to Rcpt.
 //
-// If server returns an error, it will be of type *smtp.
+// If server returns an error, it will be of type *deltasmtp.
 func (c *Client) Data() (*ContentCloser, error) {
 	if err := c.cmdValid(pipeliningTypeLast, 354, "DATA"); err != nil {
 		return nil, err
@@ -925,7 +925,7 @@ func (c *Client) DataResponse() (*ContentCloser, error) {
 // close the writer before calling any more methods on c. A call to
 // Data must be preceded by one or more calls to Rcpt.
 //
-// If server returns an error, it will be of type *smtp.
+// If server returns an error, it will be of type *deltasmtp.
 func (c *Client) Bdat(size int) (*ContentCloser, error) {
 	if c.PipeliningActive() && c.connPipelining.pending > 0 {
 		return nil, ErrPipeliningNoPendingRequired

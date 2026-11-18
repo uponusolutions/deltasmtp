@@ -13,23 +13,23 @@ import (
 
 // Parses the BY argument defined in RFC2852 section 4.
 // Returns pointer to options or nil if invalid.
-func parseDeliverByArgument(arg string) *smtp.DeliverByOptions {
+func parseDeliverByArgument(arg string) *deltasmtp.DeliverByOptions {
 	secondsStr, modeStr, ok := strings.Cut(arg, ";")
 	if !ok {
 		return nil
 	}
 	modeStr, traceValue := strings.CutSuffix(modeStr, "T")
-	if modeStr != string(smtp.DeliverByNotify) && modeStr != string(smtp.DeliverByReturn) {
+	if modeStr != string(deltasmtp.DeliverByNotify) && modeStr != string(deltasmtp.DeliverByReturn) {
 		return nil
 	}
-	modeValue := smtp.DeliverByMode(modeStr)
+	modeValue := deltasmtp.DeliverByMode(modeStr)
 	secondsValue, err := strconv.Atoi(secondsStr)
 	if err != nil ||
-		(modeValue == smtp.DeliverByReturn && (secondsValue < 1 || secondsValue > 999999999)) ||
-		(modeValue == smtp.DeliverByNotify && (secondsValue < -999999999 || secondsValue > 999999999)) {
+		(modeValue == deltasmtp.DeliverByReturn && (secondsValue < 1 || secondsValue > 999999999)) ||
+		(modeValue == deltasmtp.DeliverByNotify && (secondsValue < -999999999 || secondsValue > 999999999)) {
 		return nil
 	}
-	return &smtp.DeliverByOptions{
+	return &deltasmtp.DeliverByOptions{
 		Seconds: secondsValue,
 		Mode:    modeValue,
 		Trace:   traceValue,
@@ -165,7 +165,7 @@ func decodeUTF8AddrXtext(val string) (string, error) {
 	return decoded, nil
 }
 
-func decodeTypedAddress(val string) (smtp.DSNAddressType, string, error) {
+func decodeTypedAddress(val string) (deltasmtp.DSNAddressType, string, error) {
 	tv := strings.SplitN(val, ";", 2)
 	if len(tv) != 2 || tv[0] == "" || tv[1] == "" {
 		return "", "", errors.New("bad address")
@@ -173,13 +173,13 @@ func decodeTypedAddress(val string) (smtp.DSNAddressType, string, error) {
 	aType, aAddr := strings.ToUpper(tv[0]), tv[1]
 
 	var err error
-	switch smtp.DSNAddressType(aType) {
-	case smtp.DSNAddressTypeRFC822:
+	switch deltasmtp.DSNAddressType(aType) {
+	case deltasmtp.DSNAddressTypeRFC822:
 		aAddr, err = decodeXtext(aAddr)
 		if err == nil && !parse.IsPrintableASCII(aAddr) {
 			err = errors.New("illegal address:" + aAddr)
 		}
-	case smtp.DSNAddressTypeUTF8:
+	case deltasmtp.DSNAddressTypeUTF8:
 		aAddr, err = decodeUTF8AddrXtext(aAddr)
 	default:
 		err = errors.New("unknown address type:" + aType)
@@ -188,5 +188,5 @@ func decodeTypedAddress(val string) (smtp.DSNAddressType, string, error) {
 		return "", "", err
 	}
 
-	return smtp.DSNAddressType(aType), aAddr, nil
+	return deltasmtp.DSNAddressType(aType), aAddr, nil
 }
