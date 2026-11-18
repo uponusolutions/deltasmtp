@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794924527578,
+  "lastUpdate": 1795012834326,
   "repoUrl": "https://github.com/uponusolutions/deltasmtp",
   "entries": {
     "Benchmark": [
@@ -526,6 +526,270 @@ window.BENCHMARK_DATA = {
           {
             "name": "BenchmarkDot/Write/Text/BufferReader/Fork (github.com/uponusolutions/deltasmtp/internal)",
             "value": 1068108,
+            "unit": "ns/op",
+            "extra": "10000 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "marcel.link@uponu.com",
+            "name": "Marcel Link",
+            "username": "ml1nk"
+          },
+          "committer": {
+            "email": "marcel.link@uponu.com",
+            "name": "Marcel Link",
+            "username": "ml1nk"
+          },
+          "distinct": true,
+          "id": "176130d040188fc4af24c07c6b440e9ccf7b2f6e",
+          "message": "chore: rename smtp to deltasmtp",
+          "timestamp": "2026-11-18T15:32:15+01:00",
+          "tree_id": "e57772034225ab0f67b8d39e18fe015466882a2e",
+          "url": "https://github.com/uponusolutions/deltasmtp/commit/176130d040188fc4af24c07c6b440e9ccf7b2f6e"
+        },
+        "date": 1795012833670,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkMailer/Small/NoChunking/NoPipelining/CloseConn/MinimalReader (github.com/uponusolutions/deltasmtp)",
+            "value": 393752,
+            "unit": "ns/op",
+            "extra": "30102 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/NoChunking/NoPipelining/CloseConn/BufferReader (github.com/uponusolutions/deltasmtp)",
+            "value": 391637,
+            "unit": "ns/op",
+            "extra": "30844 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/NoChunking/Pipelining/CloseConn/MinimalReader (github.com/uponusolutions/deltasmtp)",
+            "value": 337070,
+            "unit": "ns/op",
+            "extra": "34446 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/NoChunking/Pipelining/CloseConn/BufferReader (github.com/uponusolutions/deltasmtp)",
+            "value": 330010,
+            "unit": "ns/op",
+            "extra": "36495 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/Chunking/NoPipelining/CloseConn/MinimalReader (github.com/uponusolutions/deltasmtp)",
+            "value": 468329,
+            "unit": "ns/op",
+            "extra": "25542 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/Chunking/NoPipelining/CloseConn/BufferReader (github.com/uponusolutions/deltasmtp)",
+            "value": 366214,
+            "unit": "ns/op",
+            "extra": "32628 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/Chunking/Pipelining/CloseConn/MinimalReader (github.com/uponusolutions/deltasmtp)",
+            "value": 427971,
+            "unit": "ns/op",
+            "extra": "28032 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/Chunking/Pipelining/CloseConn/BufferReader (github.com/uponusolutions/deltasmtp)",
+            "value": 332011,
+            "unit": "ns/op",
+            "extra": "35032 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/NoChunking/NoPipelining/CloseConn/MinimalReader (github.com/uponusolutions/deltasmtp)",
+            "value": 32929977,
+            "unit": "ns/op",
+            "extra": "361 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/NoChunking/NoPipelining/CloseConn/BufferReader (github.com/uponusolutions/deltasmtp)",
+            "value": 32757307,
+            "unit": "ns/op",
+            "extra": "362 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/NoChunking/NoPipelining/ReuseConn/MinimalReader (github.com/uponusolutions/deltasmtp)",
+            "value": 45378616,
+            "unit": "ns/op",
+            "extra": "289 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/NoChunking/NoPipelining/ReuseConn/BufferReader (github.com/uponusolutions/deltasmtp)",
+            "value": 46545452,
+            "unit": "ns/op",
+            "extra": "264 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/NoChunking/Pipelining/CloseConn/MinimalReader (github.com/uponusolutions/deltasmtp)",
+            "value": 34543585,
+            "unit": "ns/op",
+            "extra": "330 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/NoChunking/Pipelining/CloseConn/BufferReader (github.com/uponusolutions/deltasmtp)",
+            "value": 33121749,
+            "unit": "ns/op",
+            "extra": "358 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/NoChunking/Pipelining/ReuseConn/MinimalReader (github.com/uponusolutions/deltasmtp)",
+            "value": 42643734,
+            "unit": "ns/op",
+            "extra": "277 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/NoChunking/Pipelining/ReuseConn/BufferReader (github.com/uponusolutions/deltasmtp)",
+            "value": 41373021,
+            "unit": "ns/op",
+            "extra": "291 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/Chunking/NoPipelining/CloseConn/MinimalReader (github.com/uponusolutions/deltasmtp)",
+            "value": 28441059,
+            "unit": "ns/op",
+            "extra": "420 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/Chunking/NoPipelining/CloseConn/BufferReader (github.com/uponusolutions/deltasmtp)",
+            "value": 21182253,
+            "unit": "ns/op",
+            "extra": "530 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/Chunking/NoPipelining/ReuseConn/MinimalReader (github.com/uponusolutions/deltasmtp)",
+            "value": 20765196,
+            "unit": "ns/op",
+            "extra": "583 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/Chunking/NoPipelining/ReuseConn/BufferReader (github.com/uponusolutions/deltasmtp)",
+            "value": 20218717,
+            "unit": "ns/op",
+            "extra": "549 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/Chunking/Pipelining/CloseConn/MinimalReader (github.com/uponusolutions/deltasmtp)",
+            "value": 28264893,
+            "unit": "ns/op",
+            "extra": "397 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/Chunking/Pipelining/CloseConn/BufferReader (github.com/uponusolutions/deltasmtp)",
+            "value": 20583569,
+            "unit": "ns/op",
+            "extra": "572 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/Chunking/Pipelining/ReuseConn/MinimalReader (github.com/uponusolutions/deltasmtp)",
+            "value": 21670716,
+            "unit": "ns/op",
+            "extra": "580 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/Chunking/Pipelining/ReuseConn/BufferReader (github.com/uponusolutions/deltasmtp)",
+            "value": 19130580,
+            "unit": "ns/op",
+            "extra": "643 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Read/Binary/MinimalReader/Upstream (github.com/uponusolutions/deltasmtp/internal)",
+            "value": 21481965,
+            "unit": "ns/op",
+            "extra": "556 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Read/Binary/MinimalReader/Fork (github.com/uponusolutions/deltasmtp/internal)",
+            "value": 1155543,
+            "unit": "ns/op",
+            "extra": "10000 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Read/Binary/BufferReader/Upstream (github.com/uponusolutions/deltasmtp/internal)",
+            "value": 21499566,
+            "unit": "ns/op",
+            "extra": "558 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Read/Binary/BufferReader/Fork (github.com/uponusolutions/deltasmtp/internal)",
+            "value": 1154979,
+            "unit": "ns/op",
+            "extra": "10000 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Read/Text/MinimalReader/Upstream (github.com/uponusolutions/deltasmtp/internal)",
+            "value": 21451434,
+            "unit": "ns/op",
+            "extra": "559 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Read/Text/MinimalReader/Fork (github.com/uponusolutions/deltasmtp/internal)",
+            "value": 919711,
+            "unit": "ns/op",
+            "extra": "13005 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Read/Text/BufferReader/Upstream (github.com/uponusolutions/deltasmtp/internal)",
+            "value": 21506761,
+            "unit": "ns/op",
+            "extra": "558 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Read/Text/BufferReader/Fork (github.com/uponusolutions/deltasmtp/internal)",
+            "value": 932492,
+            "unit": "ns/op",
+            "extra": "12903 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Write/Binary/MinimalReader/Upstream (github.com/uponusolutions/deltasmtp/internal)",
+            "value": 20130072,
+            "unit": "ns/op",
+            "extra": "600 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Write/Binary/MinimalReader/Fork (github.com/uponusolutions/deltasmtp/internal)",
+            "value": 752867,
+            "unit": "ns/op",
+            "extra": "15924 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Write/Binary/BufferReader/Upstream (github.com/uponusolutions/deltasmtp/internal)",
+            "value": 20196995,
+            "unit": "ns/op",
+            "extra": "590 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Write/Binary/BufferReader/Fork (github.com/uponusolutions/deltasmtp/internal)",
+            "value": 846761,
+            "unit": "ns/op",
+            "extra": "14167 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Write/Text/MinimalReader/Upstream (github.com/uponusolutions/deltasmtp/internal)",
+            "value": 20192479,
+            "unit": "ns/op",
+            "extra": "595 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Write/Text/MinimalReader/Fork (github.com/uponusolutions/deltasmtp/internal)",
+            "value": 974297,
+            "unit": "ns/op",
+            "extra": "12303 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Write/Text/BufferReader/Upstream (github.com/uponusolutions/deltasmtp/internal)",
+            "value": 20339510,
+            "unit": "ns/op",
+            "extra": "588 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Write/Text/BufferReader/Fork (github.com/uponusolutions/deltasmtp/internal)",
+            "value": 1062990,
             "unit": "ns/op",
             "extra": "10000 times\n4 procs"
           }
