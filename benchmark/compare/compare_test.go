@@ -8,6 +8,8 @@
 // which is the faster one in both roles. That keeps its share of the time
 // small and the same for both contenders, so the difference between the
 // results is the difference between the measured implementations.
+// BenchmarkCombined measures client and server as one, each library talking
+// to itself.
 //
 // Both libraries run in their fastest configuration: one connection reused
 // for every message, no timeouts, no limits, and every extension that speeds
@@ -337,6 +339,27 @@ func BenchmarkServer(b *testing.B) {
 			for _, srv := range []serverImpl{deltaServer, goServer} {
 				b.Run(srv.name, func(b *testing.B) {
 					run(b, srv, deltaClient, msg.eml)
+				})
+			}
+		})
+	}
+}
+
+// BenchmarkCombined compares client and server as one, the client of each
+// library sends to its own server. Names are e.g. BenchmarkCombined/Large/GoSMTP.
+func BenchmarkCombined(b *testing.B) {
+	for _, msg := range messages(b) {
+		b.Run(msg.name, func(b *testing.B) {
+			for _, pair := range []struct {
+				srv serverImpl
+				c   clientImpl
+			}{
+				{srv: deltaServer, c: deltaClient},
+				{srv: goServer, c: goClient},
+			} {
+				// Server and client share the name.
+				b.Run(pair.c.name, func(b *testing.B) {
+					run(b, pair.srv, pair.c, msg.eml)
 				})
 			}
 		})

@@ -126,8 +126,9 @@
       <a href="https://github.com/emersion/go-smtp">emersion/go-smtp</a>, each in its fastest
       configuration: one connection reused for every mail, no timeouts or limits, and CHUNKING and
       PIPELINING where supported. A small (3.5 KB) and a large (13.4 MB) mail are sent to two recipients.
-      The other side of the connection is always deltasmtp, the faster one in both roles, so it adds the
-      same cost to both contenders.
+      When a client or a server is compared alone, the other side of the connection is deltasmtp, the faster
+      one in both roles, so it adds the same cost to both contenders. The last section compares client and
+      server together.
     </p>
     <p class="muted meta" id="meta"></p>
   </header>
@@ -155,6 +156,11 @@ const ROLES = [
     key: "Server",
     title: "Server",
     text: "Both servers receive from the deltasmtp client, which sends with BDAT and pipelining, both servers advertise them.",
+  },
+  {
+    key: "Combined",
+    title: "Client and server",
+    text: "The client of each library sends to its own server: deltasmtp with BDAT and pipelining, go-smtp with DATA. This is what a setup built on one library alone gets.",
   },
 ];
 
@@ -218,7 +224,7 @@ function el(tag, attrs, ...children) {
 function loadRuns() {
   const data = window.BENCHMARK_DATA;
   const entries = (data && data.entries && data.entries[ENTRY]) || [];
-  const re = /^Benchmark(Client|Server)\/(Small|Large)\/(DeltaSMTP|GoSMTP)(?:-\d+)? - (.+)$/;
+  const re = /^Benchmark(Client|Server|Combined)\/(Small|Large)\/(DeltaSMTP|GoSMTP)(?:-\d+)? - (.+)$/;
   const runs = [];
 
   for (const entry of entries) {
