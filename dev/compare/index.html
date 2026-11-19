@@ -24,10 +24,11 @@
     <h1>deltasmtp vs. go-smtp</h1>
     <p class="secondary">
       How <a href="https://github.com/uponusolutions/deltasmtp">deltasmtp</a> compares with
-      <a href="https://github.com/emersion/go-smtp">emersion/go-smtp</a>, each in its fastest
-      configuration: one connection reused for every mail, no timeouts or limits, and CHUNKING and
-      PIPELINING where supported. A small (3.5 KB) and a large (13.4 MB) mail are sent to two recipients.
-      The client of each library sends to its own server, the two libraries are never mixed.
+      <a href="https://github.com/emersion/go-smtp">emersion/go-smtp</a>. A small (3.5 KB) and a large
+      (13.4 MB) mail are sent to two recipients over one connection reused for every mail, without
+      timeouts or limits. The client of each library sends to its own server, the two libraries are
+      never mixed. Pipelining is used wherever it is supported. The first section uses everything
+      each library supports, the second sends with DATA in both.
     </p>
     <p class="muted meta" id="meta"></p>
   </header>
@@ -51,7 +52,12 @@ const ROLES = [
   {
     key: "EndToEnd",
     title: "End to end",
-    text: "The client of each library sends to its own server: deltasmtp with BDAT and pipelining, go-smtp with DATA. This is what a setup built on one library alone gets.",
+    text: "Each library in its fastest configuration: deltasmtp sends with BDAT and pipelining, go-smtp with DATA, its client supports neither. This is what a setup built on one library alone gets.",
+  },
+  {
+    key: "Data",
+    title: "Same protocol: DATA",
+    text: "Both libraries send with DATA, deltasmtp has CHUNKING turned off. deltasmtp still pipelines its commands, the go-smtp client can not. The difference to the first section is what BDAT adds.",
   },
 ];
 
