@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795095279961,
+  "lastUpdate": 1795096480771,
   "repoUrl": "https://github.com/uponusolutions/deltasmtp",
   "entries": {
     "Benchmark": [
@@ -2568,6 +2568,1182 @@ window.BENCHMARK_DATA = {
             "value": 21264254,
             "unit": "ns/op",
             "extra": "576 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "marcel.link@uponu.com",
+            "name": "Marcel Link",
+            "username": "ml1nk"
+          },
+          "committer": {
+            "email": "marcel.link@uponu.com",
+            "name": "Marcel Link",
+            "username": "ml1nk"
+          },
+          "distinct": true,
+          "id": "8b276eeaeac9c4c8ce73820892b93f890b8fd79b",
+          "message": "chore: benchmark page",
+          "timestamp": "2026-11-19T14:44:42+01:00",
+          "tree_id": "a3ebdaeee834387446603fd8cfdc5e81e38cb8b9",
+          "url": "https://github.com/uponusolutions/deltasmtp/commit/8b276eeaeac9c4c8ce73820892b93f890b8fd79b"
+        },
+        "date": 1795096480182,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkDot/Read/Binary/MinimalReader/Upstream",
+            "value": 21529507,
+            "unit": "ns/op\t    4287 B/op\t       4 allocs/op",
+            "extra": "556 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Read/Binary/MinimalReader/Upstream - ns/op",
+            "value": 21529507,
+            "unit": "ns/op",
+            "extra": "556 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Read/Binary/MinimalReader/Upstream - B/op",
+            "value": 4287,
+            "unit": "B/op",
+            "extra": "556 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Read/Binary/MinimalReader/Upstream - allocs/op",
+            "value": 4,
+            "unit": "allocs/op",
+            "extra": "556 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Read/Binary/MinimalReader/Fork",
+            "value": 1195259,
+            "unit": "ns/op\t    4272 B/op\t       4 allocs/op",
+            "extra": "9962 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Read/Binary/MinimalReader/Fork - ns/op",
+            "value": 1195259,
+            "unit": "ns/op",
+            "extra": "9962 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Read/Binary/MinimalReader/Fork - B/op",
+            "value": 4272,
+            "unit": "B/op",
+            "extra": "9962 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Read/Binary/MinimalReader/Fork - allocs/op",
+            "value": 4,
+            "unit": "allocs/op",
+            "extra": "9962 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Read/Binary/BufferReader/Upstream",
+            "value": 21361315,
+            "unit": "ns/op\t    4271 B/op\t       4 allocs/op",
+            "extra": "562 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Read/Binary/BufferReader/Upstream - ns/op",
+            "value": 21361315,
+            "unit": "ns/op",
+            "extra": "562 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Read/Binary/BufferReader/Upstream - B/op",
+            "value": 4271,
+            "unit": "B/op",
+            "extra": "562 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Read/Binary/BufferReader/Upstream - allocs/op",
+            "value": 4,
+            "unit": "allocs/op",
+            "extra": "562 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Read/Binary/BufferReader/Fork",
+            "value": 1191324,
+            "unit": "ns/op\t    4256 B/op\t       4 allocs/op",
+            "extra": "10000 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Read/Binary/BufferReader/Fork - ns/op",
+            "value": 1191324,
+            "unit": "ns/op",
+            "extra": "10000 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Read/Binary/BufferReader/Fork - B/op",
+            "value": 4256,
+            "unit": "B/op",
+            "extra": "10000 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Read/Binary/BufferReader/Fork - allocs/op",
+            "value": 4,
+            "unit": "allocs/op",
+            "extra": "10000 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Read/Text/MinimalReader/Upstream",
+            "value": 21407960,
+            "unit": "ns/op\t    4287 B/op\t       4 allocs/op",
+            "extra": "560 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Read/Text/MinimalReader/Upstream - ns/op",
+            "value": 21407960,
+            "unit": "ns/op",
+            "extra": "560 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Read/Text/MinimalReader/Upstream - B/op",
+            "value": 4287,
+            "unit": "B/op",
+            "extra": "560 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Read/Text/MinimalReader/Upstream - allocs/op",
+            "value": 4,
+            "unit": "allocs/op",
+            "extra": "560 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Read/Text/MinimalReader/Fork",
+            "value": 890292,
+            "unit": "ns/op\t    4272 B/op\t       4 allocs/op",
+            "extra": "13461 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Read/Text/MinimalReader/Fork - ns/op",
+            "value": 890292,
+            "unit": "ns/op",
+            "extra": "13461 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Read/Text/MinimalReader/Fork - B/op",
+            "value": 4272,
+            "unit": "B/op",
+            "extra": "13461 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Read/Text/MinimalReader/Fork - allocs/op",
+            "value": 4,
+            "unit": "allocs/op",
+            "extra": "13461 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Read/Text/BufferReader/Upstream",
+            "value": 21376925,
+            "unit": "ns/op\t    4271 B/op\t       4 allocs/op",
+            "extra": "560 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Read/Text/BufferReader/Upstream - ns/op",
+            "value": 21376925,
+            "unit": "ns/op",
+            "extra": "560 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Read/Text/BufferReader/Upstream - B/op",
+            "value": 4271,
+            "unit": "B/op",
+            "extra": "560 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Read/Text/BufferReader/Upstream - allocs/op",
+            "value": 4,
+            "unit": "allocs/op",
+            "extra": "560 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Read/Text/BufferReader/Fork",
+            "value": 891503,
+            "unit": "ns/op\t    4256 B/op\t       4 allocs/op",
+            "extra": "13441 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Read/Text/BufferReader/Fork - ns/op",
+            "value": 891503,
+            "unit": "ns/op",
+            "extra": "13441 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Read/Text/BufferReader/Fork - B/op",
+            "value": 4256,
+            "unit": "B/op",
+            "extra": "13441 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Read/Text/BufferReader/Fork - allocs/op",
+            "value": 4,
+            "unit": "allocs/op",
+            "extra": "13441 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Write/Binary/MinimalReader/Upstream",
+            "value": 18914238,
+            "unit": "ns/op\t    4240 B/op\t       5 allocs/op",
+            "extra": "660 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Write/Binary/MinimalReader/Upstream - ns/op",
+            "value": 18914238,
+            "unit": "ns/op",
+            "extra": "660 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Write/Binary/MinimalReader/Upstream - B/op",
+            "value": 4240,
+            "unit": "B/op",
+            "extra": "660 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Write/Binary/MinimalReader/Upstream - allocs/op",
+            "value": 5,
+            "unit": "allocs/op",
+            "extra": "660 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Write/Binary/MinimalReader/Fork",
+            "value": 762235,
+            "unit": "ns/op\t    4224 B/op\t       4 allocs/op",
+            "extra": "15729 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Write/Binary/MinimalReader/Fork - ns/op",
+            "value": 762235,
+            "unit": "ns/op",
+            "extra": "15729 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Write/Binary/MinimalReader/Fork - B/op",
+            "value": 4224,
+            "unit": "B/op",
+            "extra": "15729 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Write/Binary/MinimalReader/Fork - allocs/op",
+            "value": 4,
+            "unit": "allocs/op",
+            "extra": "15729 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Write/Binary/BufferReader/Upstream",
+            "value": 18509120,
+            "unit": "ns/op\t   36992 B/op\t       6 allocs/op",
+            "extra": "652 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Write/Binary/BufferReader/Upstream - ns/op",
+            "value": 18509120,
+            "unit": "ns/op",
+            "extra": "652 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Write/Binary/BufferReader/Upstream - B/op",
+            "value": 36992,
+            "unit": "B/op",
+            "extra": "652 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Write/Binary/BufferReader/Upstream - allocs/op",
+            "value": 6,
+            "unit": "allocs/op",
+            "extra": "652 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Write/Binary/BufferReader/Fork",
+            "value": 871275,
+            "unit": "ns/op\t   36976 B/op\t       5 allocs/op",
+            "extra": "13759 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Write/Binary/BufferReader/Fork - ns/op",
+            "value": 871275,
+            "unit": "ns/op",
+            "extra": "13759 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Write/Binary/BufferReader/Fork - B/op",
+            "value": 36976,
+            "unit": "B/op",
+            "extra": "13759 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Write/Binary/BufferReader/Fork - allocs/op",
+            "value": 5,
+            "unit": "allocs/op",
+            "extra": "13759 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Write/Text/MinimalReader/Upstream",
+            "value": 19023127,
+            "unit": "ns/op\t    4240 B/op\t       5 allocs/op",
+            "extra": "655 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Write/Text/MinimalReader/Upstream - ns/op",
+            "value": 19023127,
+            "unit": "ns/op",
+            "extra": "655 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Write/Text/MinimalReader/Upstream - B/op",
+            "value": 4240,
+            "unit": "B/op",
+            "extra": "655 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Write/Text/MinimalReader/Upstream - allocs/op",
+            "value": 5,
+            "unit": "allocs/op",
+            "extra": "655 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Write/Text/MinimalReader/Fork",
+            "value": 854846,
+            "unit": "ns/op\t    4224 B/op\t       4 allocs/op",
+            "extra": "14018 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Write/Text/MinimalReader/Fork - ns/op",
+            "value": 854846,
+            "unit": "ns/op",
+            "extra": "14018 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Write/Text/MinimalReader/Fork - B/op",
+            "value": 4224,
+            "unit": "B/op",
+            "extra": "14018 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Write/Text/MinimalReader/Fork - allocs/op",
+            "value": 4,
+            "unit": "allocs/op",
+            "extra": "14018 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Write/Text/BufferReader/Upstream",
+            "value": 18572025,
+            "unit": "ns/op\t   36992 B/op\t       6 allocs/op",
+            "extra": "646 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Write/Text/BufferReader/Upstream - ns/op",
+            "value": 18572025,
+            "unit": "ns/op",
+            "extra": "646 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Write/Text/BufferReader/Upstream - B/op",
+            "value": 36992,
+            "unit": "B/op",
+            "extra": "646 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Write/Text/BufferReader/Upstream - allocs/op",
+            "value": 6,
+            "unit": "allocs/op",
+            "extra": "646 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Write/Text/BufferReader/Fork",
+            "value": 977127,
+            "unit": "ns/op\t   36976 B/op\t       5 allocs/op",
+            "extra": "12282 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Write/Text/BufferReader/Fork - ns/op",
+            "value": 977127,
+            "unit": "ns/op",
+            "extra": "12282 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Write/Text/BufferReader/Fork - B/op",
+            "value": 36976,
+            "unit": "B/op",
+            "extra": "12282 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDot/Write/Text/BufferReader/Fork - allocs/op",
+            "value": 5,
+            "unit": "allocs/op",
+            "extra": "12282 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/NoChunking/NoPipelining/CloseConn/MinimalReader",
+            "value": 381193,
+            "unit": "ns/op\t   75169 B/op\t     201 allocs/op",
+            "extra": "31502 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/NoChunking/NoPipelining/CloseConn/MinimalReader - ns/op",
+            "value": 381193,
+            "unit": "ns/op",
+            "extra": "31502 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/NoChunking/NoPipelining/CloseConn/MinimalReader - B/op",
+            "value": 75169,
+            "unit": "B/op",
+            "extra": "31502 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/NoChunking/NoPipelining/CloseConn/MinimalReader - allocs/op",
+            "value": 201,
+            "unit": "allocs/op",
+            "extra": "31502 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/NoChunking/NoPipelining/CloseConn/BufferReader",
+            "value": 379537,
+            "unit": "ns/op\t   42507 B/op\t     202 allocs/op",
+            "extra": "31610 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/NoChunking/NoPipelining/CloseConn/BufferReader - ns/op",
+            "value": 379537,
+            "unit": "ns/op",
+            "extra": "31610 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/NoChunking/NoPipelining/CloseConn/BufferReader - B/op",
+            "value": 42507,
+            "unit": "B/op",
+            "extra": "31610 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/NoChunking/NoPipelining/CloseConn/BufferReader - allocs/op",
+            "value": 202,
+            "unit": "allocs/op",
+            "extra": "31610 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/NoChunking/NoPipelining/ReuseConn/MinimalReader",
+            "value": 125288,
+            "unit": "ns/op\t   53866 B/op\t      92 allocs/op",
+            "extra": "96392 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/NoChunking/NoPipelining/ReuseConn/MinimalReader - ns/op",
+            "value": 125288,
+            "unit": "ns/op",
+            "extra": "96392 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/NoChunking/NoPipelining/ReuseConn/MinimalReader - B/op",
+            "value": 53866,
+            "unit": "B/op",
+            "extra": "96392 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/NoChunking/NoPipelining/ReuseConn/MinimalReader - allocs/op",
+            "value": 92,
+            "unit": "allocs/op",
+            "extra": "96392 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/NoChunking/NoPipelining/ReuseConn/BufferReader",
+            "value": 122223,
+            "unit": "ns/op\t   21184 B/op\t      93 allocs/op",
+            "extra": "97990 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/NoChunking/NoPipelining/ReuseConn/BufferReader - ns/op",
+            "value": 122223,
+            "unit": "ns/op",
+            "extra": "97990 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/NoChunking/NoPipelining/ReuseConn/BufferReader - B/op",
+            "value": 21184,
+            "unit": "B/op",
+            "extra": "97990 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/NoChunking/NoPipelining/ReuseConn/BufferReader - allocs/op",
+            "value": 93,
+            "unit": "allocs/op",
+            "extra": "97990 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/NoChunking/Pipelining/CloseConn/MinimalReader",
+            "value": 317073,
+            "unit": "ns/op\t   75180 B/op\t     201 allocs/op",
+            "extra": "37762 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/NoChunking/Pipelining/CloseConn/MinimalReader - ns/op",
+            "value": 317073,
+            "unit": "ns/op",
+            "extra": "37762 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/NoChunking/Pipelining/CloseConn/MinimalReader - B/op",
+            "value": 75180,
+            "unit": "B/op",
+            "extra": "37762 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/NoChunking/Pipelining/CloseConn/MinimalReader - allocs/op",
+            "value": 201,
+            "unit": "allocs/op",
+            "extra": "37762 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/NoChunking/Pipelining/CloseConn/BufferReader",
+            "value": 315330,
+            "unit": "ns/op\t   42520 B/op\t     202 allocs/op",
+            "extra": "38170 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/NoChunking/Pipelining/CloseConn/BufferReader - ns/op",
+            "value": 315330,
+            "unit": "ns/op",
+            "extra": "38170 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/NoChunking/Pipelining/CloseConn/BufferReader - B/op",
+            "value": 42520,
+            "unit": "B/op",
+            "extra": "38170 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/NoChunking/Pipelining/CloseConn/BufferReader - allocs/op",
+            "value": 202,
+            "unit": "allocs/op",
+            "extra": "38170 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/NoChunking/Pipelining/ReuseConn/MinimalReader",
+            "value": 63011,
+            "unit": "ns/op\t   53867 B/op\t      92 allocs/op",
+            "extra": "188907 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/NoChunking/Pipelining/ReuseConn/MinimalReader - ns/op",
+            "value": 63011,
+            "unit": "ns/op",
+            "extra": "188907 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/NoChunking/Pipelining/ReuseConn/MinimalReader - B/op",
+            "value": 53867,
+            "unit": "B/op",
+            "extra": "188907 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/NoChunking/Pipelining/ReuseConn/MinimalReader - allocs/op",
+            "value": 92,
+            "unit": "allocs/op",
+            "extra": "188907 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/NoChunking/Pipelining/ReuseConn/BufferReader",
+            "value": 60342,
+            "unit": "ns/op\t   21184 B/op\t      93 allocs/op",
+            "extra": "200218 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/NoChunking/Pipelining/ReuseConn/BufferReader - ns/op",
+            "value": 60342,
+            "unit": "ns/op",
+            "extra": "200218 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/NoChunking/Pipelining/ReuseConn/BufferReader - B/op",
+            "value": 21184,
+            "unit": "B/op",
+            "extra": "200218 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/NoChunking/Pipelining/ReuseConn/BufferReader - allocs/op",
+            "value": 93,
+            "unit": "allocs/op",
+            "extra": "200218 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/Chunking/NoPipelining/CloseConn/MinimalReader",
+            "value": 458784,
+            "unit": "ns/op\t 2141132 B/op\t     205 allocs/op",
+            "extra": "26464 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/Chunking/NoPipelining/CloseConn/MinimalReader - ns/op",
+            "value": 458784,
+            "unit": "ns/op",
+            "extra": "26464 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/Chunking/NoPipelining/CloseConn/MinimalReader - B/op",
+            "value": 2141132,
+            "unit": "B/op",
+            "extra": "26464 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/Chunking/NoPipelining/CloseConn/MinimalReader - allocs/op",
+            "value": 205,
+            "unit": "allocs/op",
+            "extra": "26464 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/Chunking/NoPipelining/CloseConn/BufferReader",
+            "value": 353266,
+            "unit": "ns/op\t   42524 B/op\t     205 allocs/op",
+            "extra": "33927 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/Chunking/NoPipelining/CloseConn/BufferReader - ns/op",
+            "value": 353266,
+            "unit": "ns/op",
+            "extra": "33927 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/Chunking/NoPipelining/CloseConn/BufferReader - B/op",
+            "value": 42524,
+            "unit": "B/op",
+            "extra": "33927 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/Chunking/NoPipelining/CloseConn/BufferReader - allocs/op",
+            "value": 205,
+            "unit": "allocs/op",
+            "extra": "33927 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/Chunking/NoPipelining/ReuseConn/MinimalReader",
+            "value": 98477,
+            "unit": "ns/op\t   21120 B/op\t      92 allocs/op",
+            "extra": "121488 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/Chunking/NoPipelining/ReuseConn/MinimalReader - ns/op",
+            "value": 98477,
+            "unit": "ns/op",
+            "extra": "121488 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/Chunking/NoPipelining/ReuseConn/MinimalReader - B/op",
+            "value": 21120,
+            "unit": "B/op",
+            "extra": "121488 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/Chunking/NoPipelining/ReuseConn/MinimalReader - allocs/op",
+            "value": 92,
+            "unit": "allocs/op",
+            "extra": "121488 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/Chunking/NoPipelining/ReuseConn/BufferReader",
+            "value": 98472,
+            "unit": "ns/op\t   21185 B/op\t      94 allocs/op",
+            "extra": "121042 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/Chunking/NoPipelining/ReuseConn/BufferReader - ns/op",
+            "value": 98472,
+            "unit": "ns/op",
+            "extra": "121042 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/Chunking/NoPipelining/ReuseConn/BufferReader - B/op",
+            "value": 21185,
+            "unit": "B/op",
+            "extra": "121042 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/Chunking/NoPipelining/ReuseConn/BufferReader - allocs/op",
+            "value": 94,
+            "unit": "allocs/op",
+            "extra": "121042 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/Chunking/Pipelining/CloseConn/MinimalReader",
+            "value": 415781,
+            "unit": "ns/op\t 2141096 B/op\t     205 allocs/op",
+            "extra": "28597 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/Chunking/Pipelining/CloseConn/MinimalReader - ns/op",
+            "value": 415781,
+            "unit": "ns/op",
+            "extra": "28597 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/Chunking/Pipelining/CloseConn/MinimalReader - B/op",
+            "value": 2141096,
+            "unit": "B/op",
+            "extra": "28597 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/Chunking/Pipelining/CloseConn/MinimalReader - allocs/op",
+            "value": 205,
+            "unit": "allocs/op",
+            "extra": "28597 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/Chunking/Pipelining/CloseConn/BufferReader",
+            "value": 314702,
+            "unit": "ns/op\t   42524 B/op\t     205 allocs/op",
+            "extra": "38091 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/Chunking/Pipelining/CloseConn/BufferReader - ns/op",
+            "value": 314702,
+            "unit": "ns/op",
+            "extra": "38091 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/Chunking/Pipelining/CloseConn/BufferReader - B/op",
+            "value": 42524,
+            "unit": "B/op",
+            "extra": "38091 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/Chunking/Pipelining/CloseConn/BufferReader - allocs/op",
+            "value": 205,
+            "unit": "allocs/op",
+            "extra": "38091 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/Chunking/Pipelining/ReuseConn/MinimalReader",
+            "value": 57024,
+            "unit": "ns/op\t   21111 B/op\t      92 allocs/op",
+            "extra": "207007 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/Chunking/Pipelining/ReuseConn/MinimalReader - ns/op",
+            "value": 57024,
+            "unit": "ns/op",
+            "extra": "207007 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/Chunking/Pipelining/ReuseConn/MinimalReader - B/op",
+            "value": 21111,
+            "unit": "B/op",
+            "extra": "207007 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/Chunking/Pipelining/ReuseConn/MinimalReader - allocs/op",
+            "value": 92,
+            "unit": "allocs/op",
+            "extra": "207007 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/Chunking/Pipelining/ReuseConn/BufferReader",
+            "value": 57370,
+            "unit": "ns/op\t   21184 B/op\t      94 allocs/op",
+            "extra": "209104 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/Chunking/Pipelining/ReuseConn/BufferReader - ns/op",
+            "value": 57370,
+            "unit": "ns/op",
+            "extra": "209104 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/Chunking/Pipelining/ReuseConn/BufferReader - B/op",
+            "value": 21184,
+            "unit": "B/op",
+            "extra": "209104 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Small/Chunking/Pipelining/ReuseConn/BufferReader - allocs/op",
+            "value": 94,
+            "unit": "allocs/op",
+            "extra": "209104 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/NoChunking/NoPipelining/CloseConn/MinimalReader",
+            "value": 44817124,
+            "unit": "ns/op\t82056517 B/op\t     244 allocs/op",
+            "extra": "267 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/NoChunking/NoPipelining/CloseConn/MinimalReader - ns/op",
+            "value": 44817124,
+            "unit": "ns/op",
+            "extra": "267 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/NoChunking/NoPipelining/CloseConn/MinimalReader - B/op",
+            "value": 82056517,
+            "unit": "B/op",
+            "extra": "267 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/NoChunking/NoPipelining/CloseConn/MinimalReader - allocs/op",
+            "value": 244,
+            "unit": "allocs/op",
+            "extra": "267 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/NoChunking/NoPipelining/CloseConn/BufferReader",
+            "value": 45634028,
+            "unit": "ns/op\t82023873 B/op\t     245 allocs/op",
+            "extra": "249 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/NoChunking/NoPipelining/CloseConn/BufferReader - ns/op",
+            "value": 45634028,
+            "unit": "ns/op",
+            "extra": "249 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/NoChunking/NoPipelining/CloseConn/BufferReader - B/op",
+            "value": 82023873,
+            "unit": "B/op",
+            "extra": "249 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/NoChunking/NoPipelining/CloseConn/BufferReader - allocs/op",
+            "value": 245,
+            "unit": "allocs/op",
+            "extra": "249 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/NoChunking/NoPipelining/ReuseConn/MinimalReader",
+            "value": 54487339,
+            "unit": "ns/op\t82035147 B/op\t     135 allocs/op",
+            "extra": "223 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/NoChunking/NoPipelining/ReuseConn/MinimalReader - ns/op",
+            "value": 54487339,
+            "unit": "ns/op",
+            "extra": "223 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/NoChunking/NoPipelining/ReuseConn/MinimalReader - B/op",
+            "value": 82035147,
+            "unit": "B/op",
+            "extra": "223 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/NoChunking/NoPipelining/ReuseConn/MinimalReader - allocs/op",
+            "value": 135,
+            "unit": "allocs/op",
+            "extra": "223 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/NoChunking/NoPipelining/ReuseConn/BufferReader",
+            "value": 55068047,
+            "unit": "ns/op\t82002504 B/op\t     136 allocs/op",
+            "extra": "223 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/NoChunking/NoPipelining/ReuseConn/BufferReader - ns/op",
+            "value": 55068047,
+            "unit": "ns/op",
+            "extra": "223 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/NoChunking/NoPipelining/ReuseConn/BufferReader - B/op",
+            "value": 82002504,
+            "unit": "B/op",
+            "extra": "223 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/NoChunking/NoPipelining/ReuseConn/BufferReader - allocs/op",
+            "value": 136,
+            "unit": "allocs/op",
+            "extra": "223 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/NoChunking/Pipelining/CloseConn/MinimalReader",
+            "value": 48707588,
+            "unit": "ns/op\t82056528 B/op\t     244 allocs/op",
+            "extra": "255 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/NoChunking/Pipelining/CloseConn/MinimalReader - ns/op",
+            "value": 48707588,
+            "unit": "ns/op",
+            "extra": "255 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/NoChunking/Pipelining/CloseConn/MinimalReader - B/op",
+            "value": 82056528,
+            "unit": "B/op",
+            "extra": "255 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/NoChunking/Pipelining/CloseConn/MinimalReader - allocs/op",
+            "value": 244,
+            "unit": "allocs/op",
+            "extra": "255 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/NoChunking/Pipelining/CloseConn/BufferReader",
+            "value": 45437030,
+            "unit": "ns/op\t82023881 B/op\t     245 allocs/op",
+            "extra": "258 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/NoChunking/Pipelining/CloseConn/BufferReader - ns/op",
+            "value": 45437030,
+            "unit": "ns/op",
+            "extra": "258 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/NoChunking/Pipelining/CloseConn/BufferReader - B/op",
+            "value": 82023881,
+            "unit": "B/op",
+            "extra": "258 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/NoChunking/Pipelining/CloseConn/BufferReader - allocs/op",
+            "value": 245,
+            "unit": "allocs/op",
+            "extra": "258 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/NoChunking/Pipelining/ReuseConn/MinimalReader",
+            "value": 54971897,
+            "unit": "ns/op\t82035143 B/op\t     135 allocs/op",
+            "extra": "229 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/NoChunking/Pipelining/ReuseConn/MinimalReader - ns/op",
+            "value": 54971897,
+            "unit": "ns/op",
+            "extra": "229 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/NoChunking/Pipelining/ReuseConn/MinimalReader - B/op",
+            "value": 82035143,
+            "unit": "B/op",
+            "extra": "229 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/NoChunking/Pipelining/ReuseConn/MinimalReader - allocs/op",
+            "value": 135,
+            "unit": "allocs/op",
+            "extra": "229 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/NoChunking/Pipelining/ReuseConn/BufferReader",
+            "value": 53030946,
+            "unit": "ns/op\t82002481 B/op\t     136 allocs/op",
+            "extra": "236 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/NoChunking/Pipelining/ReuseConn/BufferReader - ns/op",
+            "value": 53030946,
+            "unit": "ns/op",
+            "extra": "236 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/NoChunking/Pipelining/ReuseConn/BufferReader - B/op",
+            "value": 82002481,
+            "unit": "B/op",
+            "extra": "236 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/NoChunking/Pipelining/ReuseConn/BufferReader - allocs/op",
+            "value": 136,
+            "unit": "allocs/op",
+            "extra": "236 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/Chunking/NoPipelining/CloseConn/MinimalReader",
+            "value": 33839212,
+            "unit": "ns/op\t84123092 B/op\t     331 allocs/op",
+            "extra": "345 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/Chunking/NoPipelining/CloseConn/MinimalReader - ns/op",
+            "value": 33839212,
+            "unit": "ns/op",
+            "extra": "345 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/Chunking/NoPipelining/CloseConn/MinimalReader - B/op",
+            "value": 84123092,
+            "unit": "B/op",
+            "extra": "345 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/Chunking/NoPipelining/CloseConn/MinimalReader - allocs/op",
+            "value": 331,
+            "unit": "allocs/op",
+            "extra": "345 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/Chunking/NoPipelining/CloseConn/BufferReader",
+            "value": 33142563,
+            "unit": "ns/op\t82023896 B/op\t     248 allocs/op",
+            "extra": "372 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/Chunking/NoPipelining/CloseConn/BufferReader - ns/op",
+            "value": 33142563,
+            "unit": "ns/op",
+            "extra": "372 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/Chunking/NoPipelining/CloseConn/BufferReader - B/op",
+            "value": 82023896,
+            "unit": "B/op",
+            "extra": "372 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/Chunking/NoPipelining/CloseConn/BufferReader - allocs/op",
+            "value": 248,
+            "unit": "allocs/op",
+            "extra": "372 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/Chunking/NoPipelining/ReuseConn/MinimalReader",
+            "value": 29687007,
+            "unit": "ns/op\t82009991 B/op\t     219 allocs/op",
+            "extra": "385 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/Chunking/NoPipelining/ReuseConn/MinimalReader - ns/op",
+            "value": 29687007,
+            "unit": "ns/op",
+            "extra": "385 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/Chunking/NoPipelining/ReuseConn/MinimalReader - B/op",
+            "value": 82009991,
+            "unit": "B/op",
+            "extra": "385 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/Chunking/NoPipelining/ReuseConn/MinimalReader - allocs/op",
+            "value": 219,
+            "unit": "allocs/op",
+            "extra": "385 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/Chunking/NoPipelining/ReuseConn/BufferReader",
+            "value": 31994419,
+            "unit": "ns/op\t82002543 B/op\t     137 allocs/op",
+            "extra": "361 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/Chunking/NoPipelining/ReuseConn/BufferReader - ns/op",
+            "value": 31994419,
+            "unit": "ns/op",
+            "extra": "361 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/Chunking/NoPipelining/ReuseConn/BufferReader - B/op",
+            "value": 82002543,
+            "unit": "B/op",
+            "extra": "361 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/Chunking/NoPipelining/ReuseConn/BufferReader - allocs/op",
+            "value": 137,
+            "unit": "allocs/op",
+            "extra": "361 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/Chunking/Pipelining/CloseConn/MinimalReader",
+            "value": 33442786,
+            "unit": "ns/op\t84123079 B/op\t     331 allocs/op",
+            "extra": "354 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/Chunking/Pipelining/CloseConn/MinimalReader - ns/op",
+            "value": 33442786,
+            "unit": "ns/op",
+            "extra": "354 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/Chunking/Pipelining/CloseConn/MinimalReader - B/op",
+            "value": 84123079,
+            "unit": "B/op",
+            "extra": "354 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/Chunking/Pipelining/CloseConn/MinimalReader - allocs/op",
+            "value": 331,
+            "unit": "allocs/op",
+            "extra": "354 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/Chunking/Pipelining/CloseConn/BufferReader",
+            "value": 32068335,
+            "unit": "ns/op\t82023919 B/op\t     248 allocs/op",
+            "extra": "384 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/Chunking/Pipelining/CloseConn/BufferReader - ns/op",
+            "value": 32068335,
+            "unit": "ns/op",
+            "extra": "384 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/Chunking/Pipelining/CloseConn/BufferReader - B/op",
+            "value": 82023919,
+            "unit": "B/op",
+            "extra": "384 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/Chunking/Pipelining/CloseConn/BufferReader - allocs/op",
+            "value": 248,
+            "unit": "allocs/op",
+            "extra": "384 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/Chunking/Pipelining/ReuseConn/MinimalReader",
+            "value": 27978346,
+            "unit": "ns/op\t82009144 B/op\t     219 allocs/op",
+            "extra": "454 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/Chunking/Pipelining/ReuseConn/MinimalReader - ns/op",
+            "value": 27978346,
+            "unit": "ns/op",
+            "extra": "454 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/Chunking/Pipelining/ReuseConn/MinimalReader - B/op",
+            "value": 82009144,
+            "unit": "B/op",
+            "extra": "454 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/Chunking/Pipelining/ReuseConn/MinimalReader - allocs/op",
+            "value": 219,
+            "unit": "allocs/op",
+            "extra": "454 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/Chunking/Pipelining/ReuseConn/BufferReader",
+            "value": 31146100,
+            "unit": "ns/op\t82002527 B/op\t     137 allocs/op",
+            "extra": "360 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/Chunking/Pipelining/ReuseConn/BufferReader - ns/op",
+            "value": 31146100,
+            "unit": "ns/op",
+            "extra": "360 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/Chunking/Pipelining/ReuseConn/BufferReader - B/op",
+            "value": 82002527,
+            "unit": "B/op",
+            "extra": "360 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMailer/Large/Chunking/Pipelining/ReuseConn/BufferReader - allocs/op",
+            "value": 137,
+            "unit": "allocs/op",
+            "extra": "360 times\n4 procs"
           }
         ]
       }
