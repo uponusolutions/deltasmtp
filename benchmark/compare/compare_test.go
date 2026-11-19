@@ -1,0 +1,355 @@
+// Package compare benchmarks deltasmtp against github.com/emersion/go-smtp.
+//
+// It is a separate module so that go-smtp never becomes a dependency of
+// deltasmtp itself. Every server is benchmarked with every client, so the
+// numbers show both how the servers compare and how the clients compare.
+//
+// Both libraries run in their fastest configuration: no timeouts, no limits,
+// and every extension that speeds up a transaction (deltasmtp: CHUNKING and
+// PIPELINING) enabled.
+package compare
+
+import (
+	"context"
+	"io"
+	"log"
+	"log/slog"
+	"net"
+	"os"
+	"path/filepath"
+	"testing"
+
+	gosmtp "github.com/emersion/go-smtp"
+	"github.com/uponusolutions/deltasmtp"
+	"github.com/uponusolutions/deltasmtp/client"
+	"github.com/uponusolutions/deltasmtp/mailer"
+	"github.com/uponusolutions/deltasmtp/server"
+)
+
+const from = "alice@internal.com"
+
+var rcpts = []string{"bob@external.com", "tim@external.com"}
+
+// sender sends one message over an established connection.
+type sender interface {
+	send(body []byte) error
+	close() error
+}
+
+// serverImpl is one server implementation, start returns the address it
+// listens on and a function stopping it.
+type serverImpl struct {
+	name  string
+	start func(b *testing.B) (addr string, stop func())
+}
+
+// clientImpl is one client implementation, dial returns a connected sender.
+type clientImpl struct {
+	name string
+	dial func(addr string) (sender, error)
+}
+
+var servers = []serverImpl{
+	{name: "DeltaSMTPServer", start: startDeltaServer},
+	{name: "GoSMTPServer", start: startGoServer},
+}
+
+var clients = []clientImpl{
+	{name: "DeltaSMTPClient", dial: dialDelta},
+	{name: "GoSMTPClient", dial: dialGo},
+}
+
+// listen opens a listener on a random loopback port.
+func listen(b *testing.B) net.Listener {
+	b.Helper()
+
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		b.Fatalf("listen: %v", err)
+	}
+
+	return l
+}
+
+// --- deltasmtp server ---
+
+type deltaBackend struct{}
+
+func (deltaBackend) NewSession(ctx context.Context, _ *server.Conn) (context.Context, server.Session, error) {
+	return ctx, &deltaSession{}, nil
+}
+
+type deltaSession struct {
+	server.Session // only the methods below are called
+}
+
+var discardLogger = slog.New(slog.DiscardHandler)
+
+func (*deltaSession) Logger(_ context.Context) *slog.Logger { return discardLogger }
+
+func (*deltaSession) AuthMechanisms(_ context.Context) []string { return nil }
+
+func (*deltaSession) Reset(ctx context.Context, _ bool) (context.Context, error) { return ctx, nil }
+
+func (*deltaSession) Close(_ context.Context, _ error) {}
+
+func (*deltaSession) Mail(_ context.Context, _ string, _ *deltasmtp.MailOptions) error { return nil }
+
+func (*deltaSession) Rcpt(_ context.Context, _ string, _ *deltasmtp.RcptOptions) error { return nil }
+
+func (*deltaSession) Data(_ context.Context, r func() io.Reader) (string, error) {
+	_, err := io.Copy(io.Discard, r())
+	return "", err
+}
+
+func startDeltaServer(b *testing.B) (string, func()) {
+	b.Helper()
+
+	s := server.New(
+		server.WithBackend(deltaBackend{}),
+		server.WithLogger(discardLogger),
+		server.WithEnableCHUNKING(true),
+		server.WithAddressValidator(nil),
+		server.WithMaxLineLength(0),
+		server.WithMaxMessageBytes(0),
+		server.WithMaxRecipients(0),
+		server.WithMaxTransactions(0),
+		server.WithMaxConnections(0),
+		server.WithMaxConnectionsPerIP(0),
+		server.WithReadTimeout(0),
+		server.WithWriteTimeout(0),
+		server.WithDataTimeout(0),
+	)
+
+	l := listen(b)
+
+	go func() { _ = s.Serve(context.Background(), l) }()
+
+	return l.Addr().String(), func() { _ = s.Close() }
+}
+
+// --- go-smtp server ---
+
+type goBackend struct{}
+
+func (goBackend) NewSession(_ *gosmtp.Conn) (gosmtp.Session, error) {
+	return goSession{}, nil
+}
+
+type goSession struct{}
+
+func (goSession) Reset() {}
+
+func (goSession) Logout() error { return nil }
+
+func (goSession) Mail(_ string, _ *gosmtp.MailOptions) error { return nil }
+
+func (goSession) Rcpt(_ string, _ *gosmtp.RcptOptions) error { return nil }
+
+func (goSession) Data(r io.Reader) error {
+	_, err := io.Copy(io.Discard, r)
+	return err
+}
+
+func startGoServer(b *testing.B) (string, func()) {
+	b.Helper()
+
+	// PIPELINING and CHUNKING are always advertised by go-smtp. Timeouts and
+	// MaxMessageBytes are disabled by their zero value.
+	s := gosmtp.NewServer(goBackend{})
+	s.Domain = "localhost"
+	s.ErrorLog = log.New(io.Discard, "", 0)
+	s.MaxLineLength = 0
+
+	l := listen(b)
+
+	go func() { _ = s.Serve(l) }()
+
+	return l.Addr().String(), func() { _ = s.Close() }
+}
+
+// --- deltasmtp client ---
+
+type deltaSender struct {
+	m *mailer.Mailer
+}
+
+func dialDelta(addr string) (sender, error) {
+	m := mailer.New(
+		mailer.WithServerAddresses(addr),
+		mailer.WithSecurity(mailer.SecurityPlain),
+		mailer.WithBasic(
+			client.WithChunking(true),
+			client.WithPipelining(true),
+			client.WithCommandTimeout(0),
+			client.WithDataTimeout(0),
+			client.WithDialTimeout(0),
+		),
+	)
+
+	if err := m.Connect(context.Background()); err != nil {
+		return nil, err
+	}
+
+	return deltaSender{m: m}, nil
+}
+
+func (s deltaSender) send(body []byte) error {
+	// A reader with Len lets the mailer send the message as a single BDAT chunk.
+	_, _, err := s.m.Send(context.Background(), from, rcpts, newReader(body))
+	return err
+}
+
+func (s deltaSender) close() error {
+	return s.m.Disconnect()
+}
+
+// --- go-smtp client ---
+
+type goSender struct {
+	c *gosmtp.Client
+}
+
+func dialGo(addr string) (sender, error) {
+	c, err := gosmtp.Dial(addr)
+	if err != nil {
+		return nil, err
+	}
+
+	// go-smtp has no option for pipelining or chunking, it always sends DATA.
+	// Its timeouts can not be disabled, a zero value expires immediately.
+
+	if err := c.Hello("localhost"); err != nil {
+		_ = c.Close()
+		return nil, err
+	}
+
+	return goSender{c: c}, nil
+}
+
+func (s goSender) send(body []byte) error {
+	return s.c.SendMail(from, rcpts, newReader(body))
+}
+
+func (s goSender) close() error {
+	return s.c.Quit()
+}
+
+// reader is a minimal io.Reader with Len, the same for both clients.
+type reader struct {
+	b []byte
+}
+
+func newReader(b []byte) *reader { return &reader{b: b} }
+
+func (r *reader) Read(p []byte) (int, error) {
+	if len(r.b) == 0 {
+		return 0, io.EOF
+	}
+
+	n := copy(p, r.b)
+	r.b = r.b[n:]
+
+	return n, nil
+}
+
+func (r *reader) Len() int { return len(r.b) }
+
+// connection is one connection lifecycle, driving the benchmark loop.
+//
+// Every error inside the loop aborts the benchmark. A failing connection would
+// otherwise race through the iterations and report an excellent — and
+// meaningless — result.
+type connection struct {
+	name string
+	run  func(b *testing.B, addr string, c clientImpl, body []byte)
+}
+
+var connections = []connection{
+	{
+		name: "ReuseConn",
+		run: func(b *testing.B, addr string, c clientImpl, body []byte) {
+			s, err := c.dial(addr)
+			if err != nil {
+				b.Fatalf("dial: %v", err)
+			}
+
+			for b.Loop() {
+				if err := s.send(body); err != nil {
+					b.Fatalf("send: %v", err)
+				}
+			}
+
+			if err := s.close(); err != nil {
+				b.Fatalf("close: %v", err)
+			}
+		},
+	},
+	{
+		name: "CloseConn",
+		run: func(b *testing.B, addr string, c clientImpl, body []byte) {
+			for b.Loop() {
+				s, err := c.dial(addr)
+				if err != nil {
+					b.Fatalf("dial: %v", err)
+				}
+
+				if err := s.send(body); err != nil {
+					b.Fatalf("send: %v", err)
+				}
+
+				if err := s.close(); err != nil {
+					b.Fatalf("close: %v", err)
+				}
+			}
+		},
+	},
+}
+
+// setBytes reports the message size so the benchmark prints throughput in MB/s.
+// Set NOSETBYTES=1 to suppress it.
+func setBytes(b *testing.B, eml []byte) {
+	b.Helper()
+
+	if os.Getenv("NOSETBYTES") != "" {
+		return
+	}
+
+	b.SetBytes(int64(len(eml)))
+}
+
+// BenchmarkCompare runs every client against every server. The names are
+// paths, e.g. Large/ReuseConn/DeltaSMTPServer/GoSMTPClient, which can be
+// filtered with -bench 'Compare/Large/.*/DeltaSMTPServer'.
+func BenchmarkCompare(b *testing.B) {
+	for _, msg := range []struct{ name, file string }{
+		{name: "Small", file: "small.eml"},
+		{name: "Large", file: "large.eml"},
+	} {
+		// The messages of the main benchmarks, an embed can not leave the module.
+		eml, err := os.ReadFile(filepath.Join("..", "testdata", msg.file))
+		if err != nil {
+			b.Fatalf("read testdata: %v", err)
+		}
+
+		b.Run(msg.name, func(b *testing.B) {
+			for _, conn := range connections {
+				b.Run(conn.name, func(b *testing.B) {
+					for _, srv := range servers {
+						b.Run(srv.name, func(b *testing.B) {
+							addr, stop := srv.start(b)
+							defer stop()
+
+							for _, c := range clients {
+								b.Run(c.name, func(b *testing.B) {
+									setBytes(b, eml)
+									conn.run(b, addr, c, eml)
+								})
+							}
+						})
+					}
+				})
+			}
+		})
+	}
+}

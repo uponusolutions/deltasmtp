@@ -1,4 +1,4 @@
-package deltasmtp_test
+package benchmark
 
 import (
 	"bytes"
@@ -251,19 +251,6 @@ var connectionConfigs = []connectionConfig{
 	},
 }
 
-// setBytes reports the message size so the benchmark prints throughput in MB/s.
-// Set NOSETBYTES=1 to suppress it, e.g. when comparing ns/op or allocations
-// across different message sizes, where a MB/s column is only noise.
-func setBytes(b *testing.B, eml []byte) {
-	b.Helper()
-
-	if os.Getenv("NOSETBYTES") != "" {
-		return
-	}
-
-	b.SetBytes(int64(len(eml)))
-}
-
 // benchmarkServer runs every client, connection and reader config against one
 // server config. The configs are nested as sub-benchmarks so the resulting
 // names are paths, e.g. Large/Chunking/Pipelining/Reuse/BytesBuffer, which can
@@ -284,7 +271,7 @@ func benchmarkServer(b *testing.B, tc testcase, sc serverConfig) {
 				b.Run(conn.name, func(b *testing.B) {
 					for _, rc := range readerConfigs {
 						b.Run(rc.name, func(b *testing.B) {
-							setBytes(b, tc.eml)
+							setBytes(b, len(tc.eml))
 
 							conn.run(b, addr, cc.opts, func(c *mailer.Mailer) error {
 								return sendMailCon(c, rc.new(tc.eml))

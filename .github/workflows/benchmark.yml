@@ -19,7 +19,7 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: go.sum
       - name: Run benchmark
-        run: export NOSETBYTES=TRUE && go test ./... -bench . -benchtime=10s -run ^$ | tee output.txt && sed -i 's/Benchmark\//Benchmark/g' output.txt  && sed -i 's/BenchmarkDotReader\//BenchmarkDotReader/g' output.txt  && sed -i 's/BenchmarkDotWriter\//BenchmarkDotWriter/g' output.txt
+        run: export NOSETBYTES=TRUE && go test ./benchmark -bench . -benchtime=10s -run ^$ | tee output.txt
       - name: Store benchmark result
         uses: benchmark-action/github-action-benchmark@v1
         with:
@@ -30,3 +30,31 @@ jobs:
           auto-push: true
           comment-on-alert: true
           alert-comment-cc-users: "@ml1nk"
+
+  compare:
+    name: Compare with go-smtp
+    # Runs after the benchmark job, both push to gh-pages.
+    needs: benchmark
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: benchmark/compare
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: benchmark/compare/go.mod
+          cache-dependency-path: benchmark/compare/go.sum
+      - name: Run benchmark
+        run: go test . -bench . -benchtime=10s -run ^$ | tee output.txt
+      - name: Store benchmark result
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: "Compare with go-smtp"
+          tool: "go"
+          output-file-path: benchmark/compare/output.txt
+          # Separate page next to the benchmark page (dev/bench).
+          benchmark-data-dir-path: dev/compare
+          fail-on-alert: false
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: true

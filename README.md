@@ -178,7 +178,10 @@ whenever the server advertises PIPELINING, `client.WithPipelining(false)` turns
 it off.
 
 Benchmarks run in CI and are published on the
-[benchmark page](https://uponusolutions.github.io/deltasmtp/dev/bench/); coverage
+[benchmark page](https://uponusolutions.github.io/deltasmtp/dev/bench/), the
+comparison with [go-smtp](https://github.com/emersion/go-smtp) (every client
+against every server, both in their fastest configuration) on the
+[comparison page](https://uponusolutions.github.io/deltasmtp/dev/compare/); coverage
 is on the [coverage page](https://uponusolutions.github.io/deltasmtp/coverage/).
 
 ## Differences from emersion/go-smtp
@@ -220,7 +223,8 @@ make test    # go test ./...
 make race    # tests with -race
 make cover   # coverage profile and HTML report
 make lint    # golangci-lint
-make bench   # benchmarks, BENCH=... TIME=... to narrow them down
+make bench   # benchmarks in benchmark/, BENCH=... TIME=... to narrow them down
+make bench-compare # comparison with go-smtp (separate module in benchmark/compare)
 make stats   # benchstat over .bench/*.txt
 ```
 

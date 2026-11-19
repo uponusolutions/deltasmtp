@@ -1,4 +1,4 @@
-package internal
+package benchmark
 
 import (
 	"bufio"
@@ -7,7 +7,6 @@ import (
 	"io"
 	"math/rand/v2"
 	upstreamtextproto "net/textproto"
-	"os"
 	"testing"
 
 	"github.com/uponusolutions/deltasmtp/internal/smtpreader"
@@ -244,19 +243,6 @@ var directionConfigs = []directionConfig{
 			}
 		},
 	},
-}
-
-// setBytes reports the size of the input so the benchmark prints throughput in
-// MB/s. Set NOSETBYTES=1 to suppress it, e.g. when comparing ns/op or
-// allocations across payload shapes, where a MB/s column is only noise.
-func setBytes(b *testing.B, n int) {
-	b.Helper()
-
-	if os.Getenv("NOSETBYTES") != "" {
-		return
-	}
-
-	b.SetBytes(int64(n))
 }
 
 // BenchmarkDot benchmarks both directions of the dot codec against every

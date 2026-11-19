@@ -13,25 +13,30 @@ lint:
 	go tool -modfile=go.tool.mod golangci-lint run
 
 benchlog:
-	GOMAXPROCS=1 go test ./... -bench . -benchmem -count=10 -run ^$$ | tee .bench/$$(date +%Y%m%dT%H%M%S).txt
+	GOMAXPROCS=1 go test ./benchmark -bench . -benchmem -count=10 -run ^$$ | tee .bench/$$(date +%Y%m%dT%H%M%S).txt
 
 BENCH	?= .
 TIME	?= 1s
 
 bench:
-	GOMAXPROCS=1 go test ./... -bench '$(BENCH)' -vet=off -benchmem -benchtime=$(TIME) -run ^$$
+	GOMAXPROCS=1 go test ./benchmark -bench '$(BENCH)' -vet=off -benchmem -benchtime=$(TIME) -run ^$$
 
 bench-mailer:
-	GOMAXPROCS=1 go test . -bench '$(BENCH)' -benchmem -benchtime=$(TIME) -run ^$$
+	GOMAXPROCS=1 go test ./benchmark -bench 'Mailer/$(BENCH)' -benchmem -benchtime=$(TIME) -run ^$$
 
 bench-dot:
-	GOMAXPROCS=1 go test ./internal/textsmtp -bench '$(BENCH)' -benchmem -benchtime=$(TIME) -run ^$$
+	GOMAXPROCS=1 go test ./benchmark -bench 'Dot/$(BENCH)' -benchmem -benchtime=$(TIME) -run ^$$
+
+# Compares deltasmtp with github.com/emersion/go-smtp, a separate module so
+# go-smtp never becomes a dependency of deltasmtp.
+bench-compare:
+	cd benchmark/compare && go test . -bench '$(BENCH)' -benchmem -benchtime=$(TIME) -run ^$$
 
 stats:
 	go tool -modfile=go.tool.mod benchstat .bench/*.txt
 
 pprof:
-	go test . -bench '$(BENCH)' -benchtime=$(TIME) -run ^$$ -cpuprofile cpu.pprof -memprofile mem.pprof
+	go test ./benchmark -bench '$(BENCH)' -benchtime=$(TIME) -run ^$$ -cpuprofile cpu.pprof -memprofile mem.pprof
 
 pprof-cpu:
 	go tool pprof -http=":8000" cpu.pprof
