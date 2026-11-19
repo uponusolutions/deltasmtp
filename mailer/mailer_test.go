@@ -66,6 +66,7 @@ var s = []*server.Server{
 	testserver.Standard(
 		serverTLS,
 		server.WithBackend(&backend),
+		server.WithEnableCHUNKING(false),
 		server.WithMaxRecipients(1000),
 	),
 	testserver.Standard(
@@ -73,6 +74,7 @@ var s = []*server.Server{
 		server.WithBackend(&backend),
 		server.WithWriterSize(1),
 		server.WithReaderSize(1),
+		server.WithEnableCHUNKING(false),
 		server.WithMaxRecipients(1000),
 	),
 	testserver.Standard(
@@ -196,7 +198,7 @@ func TestClient_SendMailAutoconnect(t *testing.T) {
 func TestClient_SendMail(t *testing.T) {
 	for i, sa := range addr {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {
-			basic := WithBasic()
+			basic := WithBasic(client.WithPipelining(false))
 			if i == 1 {
 				basic = WithBasic(client.WithReaderSize(1), client.WithWriterSize(1), client.WithPipelining(true))
 			}
@@ -274,6 +276,7 @@ func TestClient_SendMailDirect(t *testing.T) {
 		recipients,
 		func() io.Reader { return bytes.NewReader(data) },
 		withTestServer(addr[0]),
+		WithBasic(client.WithPipelining(false)),
 	)
 	require.NoError(t, err)
 
@@ -446,10 +449,7 @@ var pipeliningCases = []struct {
 func sendReport(t *testing.T, rcpts []string, pipelining bool) Report {
 	t.Helper()
 
-	opts := []Option{withTestServer(addr[0])}
-	if pipelining {
-		opts = append(opts, WithBasic(client.WithPipelining(true)))
-	}
+	opts := []Option{withTestServer(addr[0]), WithBasic(client.WithPipelining(pipelining))}
 
 	res, err := Send(
 		context.Background(),
@@ -525,7 +525,8 @@ func TestClient_SendMailPartiallyRejectedKeepsPerRcptFailures(t *testing.T) {
 }
 
 func TestClient_SendMailAutoconnectAbortOnRcptReject(t *testing.T) {
-	c := New(withTestServer(addr[0]), WithAbortOnRcptReject(true))
+	c := New(withTestServer(addr[0]), WithAbortOnRcptReject(true),
+		WithBasic(client.WithPipelining(false)))
 	require.NotNil(t, c)
 
 	defer func() {
@@ -583,7 +584,8 @@ func TestClient_SendMailAutoconnectAbortOnRcptRejectPipelining(t *testing.T) {
 }
 
 func TestClient_SendMailAutoconnectAbortOnRcptRejectAll(t *testing.T) {
-	c := New(withTestServer(addr[0]), WithAbortOnRcptReject(true))
+	c := New(withTestServer(addr[0]), WithAbortOnRcptReject(true),
+		WithBasic(client.WithPipelining(false)))
 	require.NotNil(t, c)
 
 	defer func() {
@@ -651,6 +653,7 @@ func TestClient_SendMailDirectFail(t *testing.T) {
 		recipients,
 		func() io.Reader { return bytes.NewReader(data) },
 		withTestServer(addr[0]),
+		WithBasic(client.WithPipelining(false)),
 	)
 	require.Equal(t, 1, len(rec.Failures))
 	require.Equal(t, []string{"notfound@external.com"}, rec.Failures[0].Rcpts)

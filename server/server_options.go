@@ -61,7 +61,7 @@ type Server struct {
 	// Should be used only if backend supports it.
 	enableREQUIRETLS bool
 
-	// Advertise CHUNKING (RFC 1830) capability.
+	// Advertise CHUNKING (RFC 3030) capability, defaults to true.
 	enableCHUNKING bool
 
 	// Advertise BINARYMIME (RFC 3030) capability.
@@ -160,6 +160,10 @@ func New(opts ...Option) *Server {
 		// RFC 6531 allows them, but invisible and direction changing characters
 		// make an address look different from what it is.
 		addressValidator: UTF8Clean,
+
+		// BDAT (RFC 3030) is passed to Session.Data like DATA, so the backend
+		// needs no support for it.
+		enableCHUNKING: true,
 
 		// RFC 5321 (Section 4.5.3.2.7) recommends at least 5 minutes.
 		readTimeout: 5 * time.Minute,
@@ -332,7 +336,9 @@ func WithEnableREQUIRETLS(enableREQUIRETLS bool) Option {
 	}
 }
 
-// WithEnableCHUNKING sets EnableCHUNKING.
+// WithEnableCHUNKING sets if CHUNKING (BDAT, RFC 3030) is advertised and
+// accepted. BDAT is passed to Session.Data like DATA, so the backend needs no
+// support for it. Defaults to true; if disabled, BDAT is rejected.
 func WithEnableCHUNKING(enableCHUNKING bool) Option {
 	return func(s *Server) {
 		s.enableCHUNKING = enableCHUNKING

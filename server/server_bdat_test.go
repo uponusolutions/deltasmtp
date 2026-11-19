@@ -18,6 +18,31 @@ import (
 //  - before any RCPT TO (or after only failed RCPT TO - pipelining)
 // The server needs to read and discard the chunk.
 
+// TestServerChunkingDefault checks that CHUNKING is advertised by default and
+// can be disabled.
+func TestServerChunkingDefault(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		opts []server.Option
+		want bool
+	}{
+		{name: "default", want: true},
+		{name: "disabled", opts: []server.Option{server.WithEnableCHUNKING(false)}, want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, s, c, _, caps := testServerEhlo(t, nil, tc.opts...)
+			defer func() {
+				_ = s.Close()
+				_ = c.Close()
+			}()
+
+			if caps["CHUNKING"] != tc.want {
+				t.Fatalf("CHUNKING advertised = %v, want %v", caps["CHUNKING"], tc.want)
+			}
+		})
+	}
+}
+
 // TestServerBdatDiscard checks if a BDAT chunk is discarded if it is issued directly after connection.
 func TestServerBdatDiscard(t *testing.T) {
 	_, s, c, scanner, caps := testServerEhlo(t, nil, server.WithEnableCHUNKING(true))

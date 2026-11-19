@@ -1072,6 +1072,10 @@ func TestClientMaxResponseLines(t *testing.T) {
 	})
 }
 
+func TestClientPipeliningDefault(t *testing.T) {
+	require.True(t, DefaultConfig().pipelining)
+}
+
 func TestClientChunking(t *testing.T) {
 	require.True(t, DefaultConfig().chunking)
 	require.Equal(t, 2<<20, DefaultConfig().chunkingBufferSize)

@@ -176,6 +176,7 @@ type clientConfig struct {
 var clientConfigs = []clientConfig{
 	{
 		name: "NoPipelining",
+		opts: []client.Option{client.WithPipelining(false)},
 	},
 	{
 		name: "Pipelining",

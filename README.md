@@ -65,7 +65,6 @@ calls, which is what you want for a queue runner:
 m := mailer.New(
     mailer.WithServerAddresses("mail.example.com:587"),
     mailer.WithSASLClient(sasl.NewPlainClient("", "username", "password")),
-    mailer.WithBasic(client.WithPipelining(true)),
 )
 defer func() { _ = m.Disconnect() }()
 
@@ -113,7 +112,6 @@ s := server.New(
     server.WithWriteTimeout(10*time.Second),
     server.WithMaxMessageBytes(1024*1024),
     server.WithMaxRecipients(50),
-    server.WithEnableCHUNKING(true),
     server.WithEnforceSecureConnection(true),
 )
 
@@ -145,13 +143,13 @@ it.
 
 | Extension | RFC | Client | Server |
 | --- | --- | --- | --- |
-| PIPELINING | [2920](https://tools.ietf.org/html/rfc2920) | opt-in | always |
+| PIPELINING | [2920](https://tools.ietf.org/html/rfc2920) | yes | always |
 | 8BITMIME | [6152](https://tools.ietf.org/html/rfc6152) | yes | always |
 | ENHANCEDSTATUSCODES | [2034](https://tools.ietf.org/html/rfc2034) | yes | always |
 | SIZE | [1870](https://tools.ietf.org/html/rfc1870) | yes | always |
 | STARTTLS | [3207](https://tools.ietf.org/html/rfc3207) | yes | with TLS config |
 | AUTH | [4954](https://tools.ietf.org/html/rfc4954) | yes | via [go-sasl](https://github.com/uponusolutions/go-sasl) |
-| CHUNKING / BDAT | [3030](https://tools.ietf.org/html/rfc3030) | yes | opt-in |
+| CHUNKING / BDAT | [3030](https://tools.ietf.org/html/rfc3030) | yes | yes |
 | BINARYMIME | [3030](https://tools.ietf.org/html/rfc3030) | yes | opt-in |
 | SMTPUTF8 | [6531](https://tools.ietf.org/html/rfc6531) | yes | opt-in |
 | DSN | [3461](https://tools.ietf.org/html/rfc3461) | yes | opt-in |
@@ -162,8 +160,10 @@ it.
 | LIMITS (MAILMAX, RCPTMAX) | [9422](https://tools.ietf.org/html/rfc9422) | parsed | with max transactions / recipients |
 | XOORG | non-standard | yes | opt-in |
 
-Server-side extensions are advertised only when enabled, because advertising one
-is a promise the backend has to keep. XOORG carries the accepted domain used by
+Server-side extensions marked opt-in are advertised only when enabled, because
+advertising one is a promise the backend has to keep. CHUNKING is on by default:
+BDAT reaches `Session.Data` like DATA, so the backend needs no support for it;
+`server.WithEnableCHUNKING(false)` turns it off. XOORG carries the accepted domain used by
 Exchange Online outgoing connectors.
 
 ## Performance
@@ -172,8 +172,10 @@ The hot paths are the dot and BDAT readers and writers, which stream without
 copying the whole message into memory. The client picks BDAT over DATA when the
 server advertises CHUNKING; `client.WithChunking` turns BDAT on or off and
 `client.WithChunkingBufferSize` (2 MiB by default, 0 disables buffering) controls
-how messages of unknown size are coalesced into chunks. Pipelining removes a round trip per command in both the mailer
-and the server.
+how messages of unknown size are coalesced into chunks. Pipelining removes a
+round trip per command in both the mailer and the server; the client uses it
+whenever the server advertises PIPELINING, `client.WithPipelining(false)` turns
+it off.
 
 Benchmarks run in CI and are published on the
 [benchmark page](https://uponusolutions.github.io/deltasmtp/dev/bench/); coverage
@@ -197,7 +199,7 @@ The API is not compatible with upstream. The notable changes:
 - **Structured errors and logging.** Replies are `*deltasmtp.Status` values with
   multi-line support, and each session can provide its own `*slog.Logger`.
 - **More extensions.** Client CHUNKING/BDAT and XOORG are supported in addition to what upstream offers.
-- **Pipelining on both sides**, opt-in for the client.
+- **Pipelining on both sides**, enabled by default in the client.
 - **The mailer**, which resolves MX records, sends to several servers per call
   and reports per-recipient failures.
 - **No LMTP.** Upstream supports LMTP; deltasmtp does not.

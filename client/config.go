@@ -41,6 +41,10 @@ func DefaultConfig() Config {
 
 		// Messages of unknown size are buffered and sent in chunks of 2 MiB.
 		chunkingBufferSize: 2 << 20,
+
+		// Pipeline commands (RFC 2920) if the server supports it, saves a
+		// round trip per command.
+		pipelining: true,
 	}
 }
 
@@ -115,7 +119,7 @@ type Config struct {
 	// A zero or negative value disables buffering.
 	chunkingBufferSize int
 
-	// Enable pipelining if the server supports it.
+	// Use pipelining (RFC 2920) if the server supports it, defaults to true.
 	pipelining bool
 }
 
@@ -210,7 +214,9 @@ func WithChunkingBufferSize(chunkingBufferSize int) Option {
 	}
 }
 
-// WithPipelining sets if pipelining is used when the server supports it.
+// WithPipelining sets if pipelining (RFC 2920) is used when the server
+// supports it. It is enabled by default. If disabled, every command waits for
+// its reply before the next one is sent.
 func WithPipelining(enabled bool) Option {
 	return func(c *Config) {
 		c.pipelining = enabled
