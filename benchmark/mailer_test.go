@@ -22,75 +22,55 @@ import (
 //go:embed testdata/*
 var embedTestdata embed.FS
 
-type message struct {
-	From     string
-	To       []string
-	RcptOpts []*deltasmtp.RcptOptions
-	Data     []byte
-	Opts     *deltasmtp.MailOptions
-}
-
+// backend discards every message. Keeping it would measure the backend: a
+// large message would be copied into memory, which dominated time and memory.
 type backend struct{}
 
-func (be *backend) NewSession(ctx context.Context, _ *server.Conn) (context.Context, server.Session, error) {
-	return ctx, &session{backend: be}, nil
+func (*backend) NewSession(ctx context.Context, _ *server.Conn) (context.Context, server.Session, error) {
+	return ctx, session{}, nil
 }
 
-type session struct {
-	backend *backend
+type session struct{}
 
-	msg *message
-}
-
-func (*session) Logger(_ context.Context) *slog.Logger {
+func (session) Logger(_ context.Context) *slog.Logger {
 	return nil
 }
 
-func (*session) AuthMechanisms(_ context.Context) []string {
+func (session) AuthMechanisms(_ context.Context) []string {
 	return []string{"PLAIN"}
 }
 
-func (*session) Auth(_ context.Context, _ string) (sasl.Server, error) {
+func (session) Auth(_ context.Context, _ string) (sasl.Server, error) {
 	return nil, nil
 }
 
-func (s *session) Reset(ctx context.Context, _ bool) (context.Context, error) {
-	s.msg = &message{}
+func (session) Reset(ctx context.Context, _ bool) (context.Context, error) {
 	return ctx, nil
 }
 
-func (*session) Close(_ context.Context, _ error) {
+func (session) Close(_ context.Context, _ error) {
 }
 
-func (*session) STARTTLS(_ context.Context, tls *tls.Config) (*tls.Config, error) {
+func (session) STARTTLS(_ context.Context, tls *tls.Config) (*tls.Config, error) {
 	return tls, nil
 }
 
-func (*session) Verify(_ context.Context, _ string, _ *deltasmtp.VrfyOptions) error {
+func (session) Verify(_ context.Context, _ string, _ *deltasmtp.VrfyOptions) error {
 	return nil
 }
 
-func (s *session) Mail(ctx context.Context, from string, opts *deltasmtp.MailOptions) error {
-	_, _ = s.Reset(ctx, false)
-	s.msg.From = from
-	s.msg.Opts = opts
+func (session) Mail(_ context.Context, _ string, _ *deltasmtp.MailOptions) error {
 	return nil
 }
 
-func (s *session) Rcpt(_ context.Context, to string, opts *deltasmtp.RcptOptions) error {
-	s.msg.To = append(s.msg.To, to)
-	s.msg.RcptOpts = append(s.msg.RcptOpts, opts)
+func (session) Rcpt(_ context.Context, _ string, _ *deltasmtp.RcptOptions) error {
 	return nil
 }
 
-func (s *session) Data(_ context.Context, r func() io.Reader) (string, error) {
-	b, err := io.ReadAll(r())
-	if err != nil {
-		return "", err
-	}
-	s.msg.Data = b
-
-	return "", nil
+// Data reads the whole message, the server still decodes every byte.
+func (session) Data(_ context.Context, r func() io.Reader) (string, error) {
+	_, err := io.Copy(io.Discard, r())
+	return "", err
 }
 
 // testServer starts a server on a random loopback port and returns the address
