@@ -1,0 +1,147 @@
+/*
+  Shared styles of the benchmark pages. The workflow copies this file next to
+  every page on gh-pages, see publish.sh.
+*/
+.viz-root {
+  color-scheme: light;
+  --page:           #f9f9f7;
+  --surface-1:      #fcfcfb;
+  --text-primary:   #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted:     #898781;
+  --grid:           #e1e0d9;
+  --axis:           #c3c2b7;
+  --border:         rgba(11,11,11,0.10);
+  --wash:           rgba(11,11,11,0.05);
+  --good:           #006300;
+  --bad:            #d03b3b;
+  --series-1:       #2a78d6;
+  --series-2:       #eb6834;
+  --series-3:       #1baf7a;
+  --series-4:       #eda100;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) .viz-root {
+    color-scheme: dark;
+    --page:           #0d0d0d;
+    --surface-1:      #1a1a19;
+    --text-primary:   #f0efec;
+    --text-secondary: #c3c2b7;
+    --text-muted:     #898781;
+    --grid:           #2c2c2a;
+    --axis:           #383835;
+    --border:         rgba(255,255,255,0.10);
+    --wash:           rgba(255,255,255,0.06);
+    --good:           #0ca30c;
+    --bad:            #e66767;
+    --series-1:       #3987e5;
+    --series-2:       #d95926;
+    --series-3:       #199e70;
+    --series-4:       #c98500;
+  }
+}
+:root[data-theme="dark"] .viz-root {
+  color-scheme: dark;
+  --page:           #0d0d0d;
+  --surface-1:      #1a1a19;
+  --text-primary:   #f0efec;
+  --text-secondary: #c3c2b7;
+  --text-muted:     #898781;
+  --grid:           #2c2c2a;
+  --axis:           #383835;
+  --border:         rgba(255,255,255,0.10);
+  --wash:           rgba(255,255,255,0.06);
+  --good:           #0ca30c;
+  --bad:            #e66767;
+  --series-1:       #3987e5;
+  --series-2:       #d95926;
+  --series-3:       #199e70;
+  --series-4:       #c98500;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+.viz-root {
+  min-height: 100vh;
+  background: var(--page);
+  color: var(--text-primary);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  padding: 24px 24px 64px;
+}
+main { max-width: 1240px; margin: 0 auto; }
+h1 { font-size: 24px; font-weight: 600; margin: 0 0 4px; }
+h2 { font-size: 18px; font-weight: 600; margin: 0 0 4px; }
+h3 { font-size: 14px; font-weight: 600; margin: 0 0 2px; }
+p { margin: 0; }
+a { color: inherit; }
+.secondary { color: var(--text-secondary); }
+.muted { color: var(--text-muted); font-size: 12px; }
+
+nav { display: flex; flex-wrap: wrap; gap: 4px 20px; margin-bottom: 20px; color: var(--text-secondary); }
+nav a { text-decoration: none; }
+nav a:hover { text-decoration: underline; }
+nav a[aria-current="page"] { color: var(--text-primary); font-weight: 600; }
+header { margin-bottom: 24px; }
+header p { max-width: 80ch; }
+header .meta { margin-top: 8px; }
+
+section.block {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+  margin-bottom: 24px;
+}
+.block > p { max-width: 80ch; }
+.block > h3 { margin-top: 24px; }
+
+.filters { display: flex; flex-wrap: wrap; gap: 8px 24px; margin: 16px 0 0; }
+.filter { display: flex; align-items: center; gap: 8px; color: var(--text-secondary); }
+.segmented { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; padding: 2px; }
+.segmented button {
+  font: inherit;
+  color: var(--text-secondary);
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+.segmented button:hover { background: var(--wash); }
+.segmented button[aria-pressed="true"] { background: var(--page); color: var(--text-primary); font-weight: 600; box-shadow: 0 0 0 1px var(--border); }
+.segmented button:focus-visible { outline: 2px solid var(--series-1); outline-offset: 1px; }
+
+.tiles { display: flex; flex-wrap: wrap; gap: 16px; margin: 20px 0; }
+.tile {
+  flex: 1 1 220px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 16px;
+}
+.tile .label { color: var(--text-secondary); }
+.tile .value { font-size: 28px; font-weight: 600; margin: 2px 0; }
+.tile .detail { color: var(--text-secondary); font-size: 12px; }
+.delta { font-weight: 600; }
+.delta.good { color: var(--good); }
+.delta.bad { color: var(--bad); }
+
+.legend { display: flex; flex-wrap: wrap; gap: 6px 20px; margin: 8px 0 12px; color: var(--text-secondary); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend svg { flex: none; }
+
+.charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; }
+.card { border: 1px solid var(--border); border-radius: 8px; padding: 12px 12px 8px; }
+.card .plot { position: relative; height: 260px; margin-top: 8px; }
+
+table { border-collapse: collapse; width: 100%; margin-top: 8px; }
+th, td { text-align: right; padding: 6px 10px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+th.text, td.text { text-align: left; }
+th { color: var(--text-secondary); font-weight: 600; }
+td { font-variant-numeric: tabular-nums; }
+.key { display: inline-block; width: 12px; height: 2px; vertical-align: middle; margin-right: 6px; }
+.table-wrap { overflow-x: auto; }
+.history { margin-top: 24px; }
+.empty { padding: 48px 0; text-align: center; color: var(--text-secondary); }
+/* The history grows with every run, it scrolls instead of growing the page. */
+.history .table-wrap { max-height: 400px; overflow-y: auto; }
+.history thead th { position: sticky; top: 0; background: var(--surface-1); }
