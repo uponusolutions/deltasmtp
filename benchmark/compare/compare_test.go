@@ -3,12 +3,17 @@
 // It is a separate module so that go-smtp never becomes a dependency of
 // deltasmtp itself.
 //
-// BenchmarkEndToEnd measures the whole delivery, client and server of the same
-// library, so no test mixes the two libraries.
+// Both benchmarks measure the whole delivery, client and server of the same
+// library, so no test mixes the two libraries. Both run with one connection
+// reused for every message, no timeouts and no limits.
 //
-// Both libraries run in their fastest configuration: one connection reused
-// for every message, no timeouts, no limits, and every extension that speeds
-// up a transaction (CHUNKING and PIPELINING) enabled where it is supported.
+// BenchmarkEndToEnd runs both libraries in their fastest configuration, every
+// extension that speeds up a transaction (CHUNKING and PIPELINING) enabled
+// where it is supported. go-smtp sends with DATA, its client supports neither.
+//
+// BenchmarkData compares both with DATA: deltasmtp has CHUNKING turned off
+// and sends with DATA as well. Pipelining stays on, it is always used where
+// it is supported.
 package compare
 
 import (
@@ -54,9 +59,9 @@ type clientImpl struct {
 // The names are the last element of the benchmark names, the benchmark page
 // keys on them.
 var (
-	deltaServer = serverImpl{name: "DeltaSMTP", start: startDeltaServer}
+	deltaServer = serverImpl{name: "DeltaSMTP", start: startDeltaServer(true)}
 	goServer    = serverImpl{name: "GoSMTP", start: startGoServer}
-	deltaClient = clientImpl{name: "DeltaSMTP", dial: dialDelta}
+	deltaClient = clientImpl{name: "DeltaSMTP", dial: dialDelta(true)}
 	goClient    = clientImpl{name: "GoSMTP", dial: dialGo}
 )
 
@@ -103,13 +108,22 @@ func (*deltaSession) Data(_ context.Context, r func() io.Reader) (string, error)
 	return "", err
 }
 
-func startDeltaServer(b *testing.B) (string, func()) {
+// startDeltaServer starts the deltasmtp server, CHUNKING is only advertised if
+// chunking is true.
+func startDeltaServer(chunking bool) func(b *testing.B) (string, func()) {
+	return func(b *testing.B) (string, func()) {
+		b.Helper()
+		return startDelta(b, chunking)
+	}
+}
+
+func startDelta(b *testing.B, chunking bool) (string, func()) {
 	b.Helper()
 
 	s := server.New(
 		server.WithBackend(deltaBackend{}),
 		server.WithLogger(discardLogger),
-		server.WithEnableCHUNKING(true),
+		server.WithEnableCHUNKING(chunking),
 		server.WithAddressValidator(nil),
 		server.WithMaxLineLength(0),
 		server.WithMaxMessageBytes(0),
@@ -175,12 +189,20 @@ type deltaSender struct {
 	m *mailer.Mailer
 }
 
-func dialDelta(addr string) (sender, error) {
+// dialDelta returns the dial of the deltasmtp client, chunking enables
+// CHUNKING, otherwise it sends with DATA. Pipelining is always enabled.
+func dialDelta(chunking bool) func(addr string) (sender, error) {
+	return func(addr string) (sender, error) {
+		return dialDeltaWith(addr, chunking)
+	}
+}
+
+func dialDeltaWith(addr string, chunking bool) (sender, error) {
 	m := mailer.New(
 		mailer.WithServerAddresses(addr),
 		mailer.WithSecurity(mailer.SecurityPlain),
 		mailer.WithBasic(
-			client.WithChunking(true),
+			client.WithChunking(chunking),
 			client.WithPipelining(true),
 			client.WithCommandTimeout(0),
 			client.WithDataTimeout(0),
@@ -196,7 +218,8 @@ func dialDelta(addr string) (sender, error) {
 }
 
 func (s deltaSender) send(body []byte) error {
-	// A reader with Len lets the mailer send the message as a single BDAT chunk.
+	// A reader with Len lets the mailer send the message as a single BDAT
+	// chunk, with DATA it makes no difference.
 	_, _, err := s.m.Send(context.Background(), from, rcpts, newReader(body))
 	return err
 }
@@ -312,23 +335,44 @@ func run(b *testing.B, srv serverImpl, c clientImpl, eml []byte) {
 	}
 }
 
-// BenchmarkEndToEnd compares the whole delivery, the client of each library
-// sends to its own server. Names are e.g. BenchmarkEndToEnd/Large/GoSMTP.
-func BenchmarkEndToEnd(b *testing.B) {
+// pair is a server and a client of the same library, they share the name.
+type pair struct {
+	srv serverImpl
+	c   clientImpl
+}
+
+// runPairs runs every pair with every message, names are e.g. Large/GoSMTP.
+func runPairs(b *testing.B, pairs []pair) {
+	b.Helper()
+
 	for _, msg := range messages(b) {
 		b.Run(msg.name, func(b *testing.B) {
-			for _, pair := range []struct {
-				srv serverImpl
-				c   clientImpl
-			}{
-				{srv: deltaServer, c: deltaClient},
-				{srv: goServer, c: goClient},
-			} {
-				// Server and client share the name.
-				b.Run(pair.c.name, func(b *testing.B) {
-					run(b, pair.srv, pair.c, msg.eml)
+			for _, p := range pairs {
+				b.Run(p.c.name, func(b *testing.B) {
+					run(b, p.srv, p.c, msg.eml)
 				})
 			}
 		})
 	}
+}
+
+// BenchmarkEndToEnd compares the whole delivery, each library in its fastest
+// configuration. Names are e.g. BenchmarkEndToEnd/Large/GoSMTP.
+func BenchmarkEndToEnd(b *testing.B) {
+	runPairs(b, []pair{
+		{srv: deltaServer, c: deltaClient},
+		{srv: goServer, c: goClient},
+	})
+}
+
+// BenchmarkData compares the whole delivery with DATA in both libraries,
+// pipelining where supported. Names are e.g. BenchmarkData/Large/GoSMTP.
+func BenchmarkData(b *testing.B) {
+	runPairs(b, []pair{
+		{
+			srv: serverImpl{name: "DeltaSMTP", start: startDeltaServer(false)},
+			c:   clientImpl{name: "DeltaSMTP", dial: dialDelta(false)},
+		},
+		{srv: goServer, c: goClient},
+	})
 }
