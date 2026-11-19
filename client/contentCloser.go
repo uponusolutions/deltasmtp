@@ -3,6 +3,7 @@ package client
 import (
 	"errors"
 	"io"
+	"sync"
 
 	"github.com/uponusolutions/deltasmtp"
 	"github.com/uponusolutions/deltasmtp/internal/deadline"
@@ -14,6 +15,24 @@ type ContentCloser struct {
 	writer io.WriteCloser
 	c      *Client
 	closed bool
+	// chunkingBuffer is the buffer of the writer, returned to chunkingBuffers
+	// once the writer is closed. Nil if the writer has none.
+	chunkingBuffer *[]byte
+}
+
+// chunkingBuffers holds the buffers for chunking messages of unknown size,
+// shared by all clients. A buffer is only needed while a message is written,
+// so a new connection does not have to allocate (and zero) its own.
+var chunkingBuffers sync.Pool
+
+// getChunkingBuffer returns a buffer of at least size bytes from the pool,
+// or a new one. A pooled buffer that is too small is left to the GC.
+func getChunkingBuffer(size int) *[]byte {
+	if b, ok := chunkingBuffers.Get().(*[]byte); ok && cap(*b) >= size {
+		return b
+	}
+	b := make([]byte, size)
+	return &b
 }
 
 // Writer returns inner io.Writer which possible implement more methods (e.g. ReadFrom)
@@ -47,7 +66,15 @@ func (d *ContentCloser) CloseWithResponse() (*deltasmtp.Status, error) {
 		return nil, ErrNotConnected
 	}
 
-	if err := d.writer.Close(); err != nil {
+	err := d.writer.Close()
+
+	// The writer is done with its buffer, even if closing failed.
+	if d.chunkingBuffer != nil {
+		chunkingBuffers.Put(d.chunkingBuffer)
+		d.chunkingBuffer = nil
+	}
+
+	if err != nil {
 		if _, ok := err.(*deltasmtp.Status); !ok {
 			_ = d.c.Close()
 		}

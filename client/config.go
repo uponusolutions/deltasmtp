@@ -206,6 +206,9 @@ func WithChunking(enabled bool) Option {
 // the message size is unknown. Every full buffer is sent as one chunk, so it
 // is the chunk size of such messages. Defaults to 2 MiB.
 //
+// The buffers are shared by all clients (sync.Pool) and only held while a
+// message is written, so a new connection does not allocate its own.
+//
 // A zero or negative value disables buffering, then every write is sent as
 // its own chunk. Only do this if your writes are large enough.
 func WithChunkingBufferSize(chunkingBufferSize int) Option {

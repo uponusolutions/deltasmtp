@@ -1121,6 +1121,30 @@ func TestClientChunking(t *testing.T) {
 		require.True(t, strings.HasSuffix(out, "BDAT 0 LAST\r\n"))
 	})
 
+	t.Run("a pooled buffer is used without its old content", func(t *testing.T) {
+		// larger than needed and full of stale data of another message
+		stale := bytes.Repeat([]byte("J"), 4<<20)
+		chunkingBuffers.Put(&stale)
+
+		out := send(t, 0, plain("abc"))
+		require.Contains(t, out, "BDAT 3 LAST\r\nabc")
+		require.NotContains(t, out, "J")
+	})
+
+	t.Run("the buffer is released when the content is closed", func(t *testing.T) {
+		c := New()
+		c.setConn(tester.NewFakeConn("250-localhost\r\n250 CHUNKING\r\n250 2.0.0 OK\r\n", &bytes.Buffer{}))
+		require.NoError(t, c.ehlo())
+
+		w, err := c.Bdat(0)
+		require.NoError(t, err)
+		require.NotNil(t, w.chunkingBuffer)
+		_, err = io.WriteString(w, "abc")
+		require.NoError(t, err)
+		require.NoError(t, w.Close())
+		require.Nil(t, w.chunkingBuffer)
+	})
+
 	t.Run("zero buffer size disables buffering", func(t *testing.T) {
 		out := send(t, 0, strings.NewReader("abc"), WithChunkingBufferSize(0))
 		require.Contains(t, out, "BDAT 3\r\nabcBDAT 0 LAST\r\n")
@@ -1353,4 +1377,14 @@ func TestClientDefaultTimeouts(t *testing.T) {
 	require.Equal(t, 12*time.Minute, cfg.dataTimeout)
 	require.Equal(t, 30*time.Second, cfg.tlsHandshakeTimeout)
 	require.Equal(t, 30*time.Second, cfg.dialTimeout)
+}
+
+func TestGetChunkingBuffer(t *testing.T) {
+	small := make([]byte, 10)
+	chunkingBuffers.Put(&small)
+
+	// a pooled buffer that is too small is never returned
+	b := getChunkingBuffer(100)
+	require.GreaterOrEqual(t, cap(*b), 100)
+	require.GreaterOrEqual(t, len(*b), 100)
 }

@@ -42,10 +42,6 @@ import (
 type Client struct {
 	cfg Config
 
-	// The buffer is used if chunking/bdat is used with buffering.
-	// It is created on first use and its size is chunkingBufferSize.
-	chunkingBuffer []byte
-
 	// keep a reference to the connection so it can be used to create a TLS
 	// connection later
 	conn     net.Conn
@@ -940,14 +936,14 @@ func (c *Client) Bdat(size int) (*ContentCloser, error) {
 
 	// the size is unknown, buffer to send chunks of chunkingBufferSize
 	if size == 0 && c.cfg.chunkingBufferSize > 0 {
-		// c.chunkingBuffer is init on first use and always reused
-		if len(c.chunkingBuffer) < c.cfg.chunkingBufferSize {
-			c.chunkingBuffer = make([]byte, c.cfg.chunkingBufferSize)
-		}
+		buffer := getChunkingBuffer(c.cfg.chunkingBufferSize)
 
-		return c.newContentCloser(smtpwriter.NewBdatWriterBuffered(c.sender.Writer, func() error {
+		cc := c.newContentCloser(smtpwriter.NewBdatWriterBuffered(c.sender.Writer, func() error {
 			return c.receiveResponseValid(250)
-		}, size, c.chunkingBuffer[:c.cfg.chunkingBufferSize])), nil
+		}, size, (*buffer)[:c.cfg.chunkingBufferSize]))
+		cc.chunkingBuffer = buffer
+
+		return cc, nil
 	}
 
 	return c.newContentCloser(smtpwriter.NewBdat(c.sender.Writer, func() error {
