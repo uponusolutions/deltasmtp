@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795092988202,
+  "lastUpdate": 1795093560063,
   "repoUrl": "https://github.com/uponusolutions/deltasmtp",
   "entries": {
     "Compare with go-smtp": [
@@ -312,6 +312,318 @@ window.BENCHMARK_DATA = {
             "value": 137.07,
             "unit": "MB/s",
             "extra": "122 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "marcel.link@uponu.com",
+            "name": "Marcel Link",
+            "username": "ml1nk"
+          },
+          "committer": {
+            "email": "marcel.link@uponu.com",
+            "name": "Marcel Link",
+            "username": "ml1nk"
+          },
+          "distinct": true,
+          "id": "f09f10a34c5a2dcf778502ba672aa8ea6f98a809",
+          "message": "fix: disable max transactions for benchmark",
+          "timestamp": "2026-11-19T13:52:26+01:00",
+          "tree_id": "889d177cbb159d22cc3e9a62e09856b347e77a33",
+          "url": "https://github.com/uponusolutions/deltasmtp/commit/f09f10a34c5a2dcf778502ba672aa8ea6f98a809"
+        },
+        "date": 1795093559373,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkCompare/Small/ReuseConn/DeltaSMTPServer/DeltaSMTPClient",
+            "value": 38112,
+            "unit": "ns/op\t  92.73 MB/s",
+            "extra": "315951 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkCompare/Small/ReuseConn/DeltaSMTPServer/DeltaSMTPClient - ns/op",
+            "value": 38112,
+            "unit": "ns/op",
+            "extra": "315951 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkCompare/Small/ReuseConn/DeltaSMTPServer/DeltaSMTPClient - MB/s",
+            "value": 92.73,
+            "unit": "MB/s",
+            "extra": "315951 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkCompare/Small/ReuseConn/DeltaSMTPServer/GoSMTPClient",
+            "value": 95481,
+            "unit": "ns/op\t  37.01 MB/s",
+            "extra": "128238 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkCompare/Small/ReuseConn/DeltaSMTPServer/GoSMTPClient - ns/op",
+            "value": 95481,
+            "unit": "ns/op",
+            "extra": "128238 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkCompare/Small/ReuseConn/DeltaSMTPServer/GoSMTPClient - MB/s",
+            "value": 37.01,
+            "unit": "MB/s",
+            "extra": "128238 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkCompare/Small/ReuseConn/GoSMTPServer/DeltaSMTPClient",
+            "value": 64695,
+            "unit": "ns/op\t  54.63 MB/s",
+            "extra": "186160 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkCompare/Small/ReuseConn/GoSMTPServer/DeltaSMTPClient - ns/op",
+            "value": 64695,
+            "unit": "ns/op",
+            "extra": "186160 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkCompare/Small/ReuseConn/GoSMTPServer/DeltaSMTPClient - MB/s",
+            "value": 54.63,
+            "unit": "MB/s",
+            "extra": "186160 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkCompare/Small/ReuseConn/GoSMTPServer/GoSMTPClient",
+            "value": 102919,
+            "unit": "ns/op\t  34.34 MB/s",
+            "extra": "120386 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkCompare/Small/ReuseConn/GoSMTPServer/GoSMTPClient - ns/op",
+            "value": 102919,
+            "unit": "ns/op",
+            "extra": "120386 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkCompare/Small/ReuseConn/GoSMTPServer/GoSMTPClient - MB/s",
+            "value": 34.34,
+            "unit": "MB/s",
+            "extra": "120386 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkCompare/Small/CloseConn/DeltaSMTPServer/DeltaSMTPClient",
+            "value": 175909,
+            "unit": "ns/op\t  20.09 MB/s",
+            "extra": "68968 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkCompare/Small/CloseConn/DeltaSMTPServer/DeltaSMTPClient - ns/op",
+            "value": 175909,
+            "unit": "ns/op",
+            "extra": "68968 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkCompare/Small/CloseConn/DeltaSMTPServer/DeltaSMTPClient - MB/s",
+            "value": 20.09,
+            "unit": "MB/s",
+            "extra": "68968 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkCompare/Small/CloseConn/DeltaSMTPServer/GoSMTPClient",
+            "value": 241035,
+            "unit": "ns/op\t  14.66 MB/s",
+            "extra": "48986 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkCompare/Small/CloseConn/DeltaSMTPServer/GoSMTPClient - ns/op",
+            "value": 241035,
+            "unit": "ns/op",
+            "extra": "48986 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkCompare/Small/CloseConn/DeltaSMTPServer/GoSMTPClient - MB/s",
+            "value": 14.66,
+            "unit": "MB/s",
+            "extra": "48986 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkCompare/Small/CloseConn/GoSMTPServer/DeltaSMTPClient",
+            "value": 243474,
+            "unit": "ns/op\t  14.51 MB/s",
+            "extra": "49536 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkCompare/Small/CloseConn/GoSMTPServer/DeltaSMTPClient - ns/op",
+            "value": 243474,
+            "unit": "ns/op",
+            "extra": "49536 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkCompare/Small/CloseConn/GoSMTPServer/DeltaSMTPClient - MB/s",
+            "value": 14.51,
+            "unit": "MB/s",
+            "extra": "49536 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkCompare/Small/CloseConn/GoSMTPServer/GoSMTPClient",
+            "value": 297756,
+            "unit": "ns/op\t  11.87 MB/s",
+            "extra": "42080 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkCompare/Small/CloseConn/GoSMTPServer/GoSMTPClient - ns/op",
+            "value": 297756,
+            "unit": "ns/op",
+            "extra": "42080 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkCompare/Small/CloseConn/GoSMTPServer/GoSMTPClient - MB/s",
+            "value": 11.87,
+            "unit": "MB/s",
+            "extra": "42080 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkCompare/Large/ReuseConn/DeltaSMTPServer/DeltaSMTPClient",
+            "value": 4527979,
+            "unit": "ns/op\t2954.16 MB/s",
+            "extra": "2721 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkCompare/Large/ReuseConn/DeltaSMTPServer/DeltaSMTPClient - ns/op",
+            "value": 4527979,
+            "unit": "ns/op",
+            "extra": "2721 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkCompare/Large/ReuseConn/DeltaSMTPServer/DeltaSMTPClient - MB/s",
+            "value": 2954.16,
+            "unit": "MB/s",
+            "extra": "2721 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkCompare/Large/ReuseConn/DeltaSMTPServer/GoSMTPClient",
+            "value": 64439097,
+            "unit": "ns/op\t 207.58 MB/s",
+            "extra": "188 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkCompare/Large/ReuseConn/DeltaSMTPServer/GoSMTPClient - ns/op",
+            "value": 64439097,
+            "unit": "ns/op",
+            "extra": "188 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkCompare/Large/ReuseConn/DeltaSMTPServer/GoSMTPClient - MB/s",
+            "value": 207.58,
+            "unit": "MB/s",
+            "extra": "188 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkCompare/Large/ReuseConn/GoSMTPServer/DeltaSMTPClient",
+            "value": 4095296,
+            "unit": "ns/op\t3266.28 MB/s",
+            "extra": "3100 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkCompare/Large/ReuseConn/GoSMTPServer/DeltaSMTPClient - ns/op",
+            "value": 4095296,
+            "unit": "ns/op",
+            "extra": "3100 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkCompare/Large/ReuseConn/GoSMTPServer/DeltaSMTPClient - MB/s",
+            "value": 3266.28,
+            "unit": "MB/s",
+            "extra": "3100 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkCompare/Large/ReuseConn/GoSMTPServer/GoSMTPClient",
+            "value": 70241116,
+            "unit": "ns/op\t 190.44 MB/s",
+            "extra": "181 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkCompare/Large/ReuseConn/GoSMTPServer/GoSMTPClient - ns/op",
+            "value": 70241116,
+            "unit": "ns/op",
+            "extra": "181 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkCompare/Large/ReuseConn/GoSMTPServer/GoSMTPClient - MB/s",
+            "value": 190.44,
+            "unit": "MB/s",
+            "extra": "181 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkCompare/Large/CloseConn/DeltaSMTPServer/DeltaSMTPClient",
+            "value": 4971822,
+            "unit": "ns/op\t2690.44 MB/s",
+            "extra": "2421 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkCompare/Large/CloseConn/DeltaSMTPServer/DeltaSMTPClient - ns/op",
+            "value": 4971822,
+            "unit": "ns/op",
+            "extra": "2421 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkCompare/Large/CloseConn/DeltaSMTPServer/DeltaSMTPClient - MB/s",
+            "value": 2690.44,
+            "unit": "MB/s",
+            "extra": "2421 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkCompare/Large/CloseConn/DeltaSMTPServer/GoSMTPClient",
+            "value": 59952496,
+            "unit": "ns/op\t 223.12 MB/s",
+            "extra": "199 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkCompare/Large/CloseConn/DeltaSMTPServer/GoSMTPClient - ns/op",
+            "value": 59952496,
+            "unit": "ns/op",
+            "extra": "199 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkCompare/Large/CloseConn/DeltaSMTPServer/GoSMTPClient - MB/s",
+            "value": 223.12,
+            "unit": "MB/s",
+            "extra": "199 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkCompare/Large/CloseConn/GoSMTPServer/DeltaSMTPClient",
+            "value": 4554607,
+            "unit": "ns/op\t2936.89 MB/s",
+            "extra": "2630 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkCompare/Large/CloseConn/GoSMTPServer/DeltaSMTPClient - ns/op",
+            "value": 4554607,
+            "unit": "ns/op",
+            "extra": "2630 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkCompare/Large/CloseConn/GoSMTPServer/DeltaSMTPClient - MB/s",
+            "value": 2936.89,
+            "unit": "MB/s",
+            "extra": "2630 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkCompare/Large/CloseConn/GoSMTPServer/GoSMTPClient",
+            "value": 61091411,
+            "unit": "ns/op\t 218.96 MB/s",
+            "extra": "196 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkCompare/Large/CloseConn/GoSMTPServer/GoSMTPClient - ns/op",
+            "value": 61091411,
+            "unit": "ns/op",
+            "extra": "196 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkCompare/Large/CloseConn/GoSMTPServer/GoSMTPClient - MB/s",
+            "value": 218.96,
+            "unit": "MB/s",
+            "extra": "196 times\n4 procs"
           }
         ]
       }
