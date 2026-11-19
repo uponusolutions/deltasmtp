@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>deltasmtp benchmarks</title>
+<!--
+  Benchmarks of deltasmtp, published as dev/bench/index.html on gh-pages by
+  benchmark/pages/publish.sh. The benchmarks are in benchmark/.
+-->
+<link rel="stylesheet" href="common.css">
+</head>
+<body>
+<div class="viz-root">
+<main>
+  <nav aria-label="Pages">
+    <a href="../bench/" aria-current="page">Benchmarks</a>
+    <a href="../compare/">Comparison with go-smtp</a>
+    <a href="../../coverage/">Coverage</a>
+    <a href="https://github.com/uponusolutions/deltasmtp">Repository</a>
+  </nav>
+  <header>
+    <h1>deltasmtp benchmarks</h1>
+    <p class="secondary">
+      Every push to main runs the benchmarks of
+      <a href="https://github.com/uponusolutions/deltasmtp">deltasmtp</a> on a GitHub runner, so a
+      change that makes it slower shows up here. Single runs on shared runners vary by a few percent,
+      look for steps that last.
+    </p>
+    <p class="muted meta" id="meta"></p>
+  </header>
+  <div id="content"></div>
+</main>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"
+        integrity="sha384-9nhczxUqK87bcKHh20fSQcTGD4qq5GhayNYSYWqwBkINBhOfQLg/P5HG5lF1urn4"
+        crossorigin="anonymous"></script>
+<script src="data.js"></script>
+<script src="common.js"></script>
+<script>
+"use strict";
+const { fmt, el, value } = Bench;
+
+// The entry name of github-action-benchmark, its default.
+const ENTRY = "Benchmark";
+
+// The filters of both sections, the first option is the default.
+const state = {};
+let redraw;
+
+function filter(id, label, options) {
+  if (!(id in state)) state[id] = options[0].key;
+  return Bench.filter(label, options, state[id], (k) => { state[id] = k; redraw(); });
+}
+
+// tiles of the previous run where it has values, to show the change.
+function previous(runs, has) {
+  for (let i = runs.length - 2; i >= 0; i--) if (has(runs[i])) return runs[i];
+  return undefined;
+}
+
+// --- Mailer: BenchmarkMailer in benchmark/mailer_test.go ---
+
+const SIZES = [
+  { key: "Small", label: "Small mail", text: "3.5 KB" },
+  { key: "Large", label: "Large mail", text: "13.4 MB" },
+];
+
+// The configs differ in the server (CHUNKING advertised or not) and the
+// client (pipelining or not). Color and marker shape both tell them apart.
+const MAIL_CONFIGS = [
+  { server: "Chunking", client: "Pipelining", label: "BDAT + pipelining (default)", short: "BDAT + pipelining", color: "--series-1", point: "circle" },
+  { server: "Chunking", client: "NoPipelining", label: "BDAT", short: "BDAT", color: "--series-2", point: "rectRounded" },
+  { server: "NoChunking", client: "Pipelining", label: "DATA + pipelining", short: "DATA + pipelining", color: "--series-3", point: "triangle" },
+  { server: "NoChunking", client: "NoPipelining", label: "DATA", short: "DATA", color: "--series-4", point: "rectRot" },
+];
+
+const mailName = (size, c) =>
+  ["Mailer", size.key, c.server, c.client, state.conn, state.reader].join("/");
+
+function mailerSection(allRuns) {
+  const runs = allRuns.filter((r) => Object.keys(r.values).some((n) => n.startsWith("Mailer/")));
+  if (!runs.length) return null;
+
+  const filters = el("div", { class: "filters" },
+    filter("conn", "Connection", [
+      { key: "ReuseConn", label: "Reused" },
+      { key: "CloseConn", label: "New per mail" },
+    ]),
+    filter("reader", "Message", [
+      { key: "BufferReader", label: "Known size" },
+      { key: "MinimalReader", label: "Unknown size" },
+    ]));
+
+  const latest = runs[runs.length - 1];
+  const def = MAIL_CONFIGS[0];
+  const plain = MAIL_CONFIGS[3];
+
+  const tiles = el("div", { class: "tiles" });
+  for (const size of SIZES) {
+    const t = value(latest, mailName(size, def), "ns/op");
+    if (t === undefined) continue;
+    const prev = previous(runs, (r) => value(r, mailName(size, def), "ns/op") !== undefined);
+    const p = value(latest, mailName(size, plain), "ns/op");
+    tiles.append(Bench.tile(size.label + " (" + size.text + "), default settings", fmt.time(t),
+      Bench.delta(t, value(prev, mailName(size, def), "ns/op")),
+      p === undefined ? null : fmt.speed(t, p) + " than plain DATA (" + fmt.time(p) + ")"));
+  }
+
+  const units = ["ns/op", "B/op", "allocs/op"].filter((u) =>
+    SIZES.some((s) => value(latest, mailName(s, def), u) !== undefined));
+  const unitTitle = { "ns/op": "time", "B/op": "memory", "allocs/op": "allocations" };
+  const unitFmt = { "ns/op": fmt.time, "B/op": fmt.bytes, "allocs/op": fmt.count };
+
+  const rows = MAIL_CONFIGS.map((c) => [
+    el("span", null, Bench.key(c.color), c.label),
+    ...SIZES.flatMap((s) => units.map((u) => {
+      const v = value(latest, mailName(s, c), u);
+      return v === undefined ? "–" : unitFmt[u](v);
+    })),
+  ]);
+
+  const series = (size) => MAIL_CONFIGS.map((c) => ({
+    label: c.short, color: c.color, point: c.point,
+    get: (run) => value(run, mailName(size, c), "ns/op"),
+  }));
+
+  return el("section", { class: "block" },
+    el("h2", null, "Sending a mail"),
+    el("p", { class: "secondary" },
+      "The mailer sends a mail to two recipients through the deltasmtp client to the deltasmtp server on " +
+      "the loopback interface. BDAT needs CHUNKING on the server, pipelining saves the round trips between " +
+      "the commands. A message of known size is sent as one chunk, otherwise in chunks of 2 MiB."),
+    filters,
+    tiles,
+    el("h3", null, "Latest run"),
+    Bench.table(["Protocol", ...SIZES.flatMap((s) => units.map((u) => s.label.split(" ")[0] + ", " + unitTitle[u]))], rows),
+    el("h3", null, "Time per mail, per commit"),
+    el("p", { class: "muted" }, "Lower is better. Click a point to open the commit."),
+    Bench.legend(series(SIZES[0])),
+    el("div", { class: "charts" }, SIZES.map((size) => Bench.lineChart({
+      title: size.label, note: size.text, runs, series: series(size), format: fmt.time,
+    }))),
+    SIZES.map((size) => Bench.historyTable(size.label + ", time per mail of every run", runs, series(size), fmt.time)));
+}
+
+// --- Dot codec: BenchmarkDot in benchmark/dot_test.go ---
+
+// The size of the body, payloadSize in benchmark/dot_test.go.
+const DOT_BYTES = 4 << 20;
+
+const DIRECTIONS = [
+  { key: "Read", label: "Reading", text: "decoding a received message" },
+  { key: "Write", label: "Writing", text: "encoding a message to send" },
+];
+
+const DOT_IMPLS = [
+  { key: "Fork", label: "deltasmtp", color: "--series-1", point: "circle" },
+  { key: "Upstream", label: "net/textproto", color: "--series-2", point: "rectRounded" },
+];
+
+const BODIES = [
+  { key: "Text", label: "Text" },
+  { key: "Binary", label: "Binary" },
+];
+
+const SOURCES = [
+  { key: "MinimalReader", label: "bytes.Reader" },
+  { key: "BufferReader", label: "io.Reader only" },
+];
+
+const dotName = (dir, impl, body, source) =>
+  ["Dot", dir.key, body || state.body, source || state.source, impl.key].join("/");
+
+function dotSection(allRuns) {
+  const runs = allRuns.filter((r) => Object.keys(r.values).some((n) => n.startsWith("Dot/")));
+  if (!runs.length) return null;
+
+  const filters = el("div", { class: "filters" },
+    filter("body", "Body", BODIES),
+    filter("source", "Source", SOURCES));
+
+  const latest = runs[runs.length - 1];
+  const [fork, upstream] = DOT_IMPLS;
+
+  const tiles = el("div", { class: "tiles" });
+  for (const dir of DIRECTIONS) {
+    const f = value(latest, dotName(dir, fork), "ns/op");
+    const u = value(latest, dotName(dir, upstream), "ns/op");
+    if (f === undefined || u === undefined) continue;
+    const prev = previous(runs, (r) => value(r, dotName(dir, fork), "ns/op") !== undefined);
+    tiles.append(Bench.tile(dir.label + ", " + dir.text,
+      fmt.speed(f, u),
+      fmt.time(f) + " vs. " + fmt.time(u) + " with net/textproto for 4 MiB, " +
+        fmt.mbs(DOT_BYTES / f * 1e3) + " vs. " + fmt.mbs(DOT_BYTES / u * 1e3),
+      Bench.delta(f, value(prev, dotName(dir, fork), "ns/op"))));
+  }
+
+  // The table view lists every variant, independent of the filters.
+  const rows = [];
+  for (const dir of DIRECTIONS) {
+    for (const body of BODIES) {
+      for (const source of SOURCES) {
+        const f = value(latest, dotName(dir, fork, body.key, source.key), "ns/op");
+        const u = value(latest, dotName(dir, upstream, body.key, source.key), "ns/op");
+        rows.push([dir.label, body.label, source.label,
+          f === undefined ? "–" : fmt.time(f),
+          u === undefined ? "–" : fmt.time(u),
+          f === undefined || u === undefined ? "–" : fmt.ratio(u / f)]);
+      }
+    }
+  }
+
+  const series = (dir) => DOT_IMPLS.map((impl) => ({
+    label: impl.label, color: impl.color, point: impl.point,
+    get: (run) => value(run, dotName(dir, impl), "ns/op"),
+  }));
+
+  return el("section", { class: "block" },
+    el("h2", null, "Dot encoding"),
+    el("p", { class: "secondary" },
+      "DATA ends a message with a line holding a single dot, so lines starting with a dot get a second one. " +
+      "deltasmtp encodes and decodes this itself instead of using net/textproto from the Go standard library. " +
+      "The benchmark moves a 4 MiB body, text has a dot at the start of every eighth line, binary data " +
+      "has none. bytes.Reader hands the whole body over at once, a plain io.Reader in 32 KiB steps."),
+    filters,
+    tiles,
+    el("h3", null, "Latest run, every variant"),
+    Bench.table(["Direction", "Body", "Source", "deltasmtp", "net/textproto", "Speedup"], rows, 3),
+    el("h3", null, "Time per 4 MiB body, per commit"),
+    el("p", { class: "muted" }, "Lower is better, log scale. Click a point to open the commit."),
+    Bench.legend(series(DIRECTIONS[0])),
+    el("div", { class: "charts" }, DIRECTIONS.map((dir) => Bench.lineChart({
+      title: dir.label, note: dir.text, runs, series: series(dir), format: fmt.time, log: true,
+    }))),
+    DIRECTIONS.map((dir) => Bench.historyTable(dir.label + ", time of every run", runs, series(dir), fmt.time)));
+}
+
+redraw = Bench.start((content) => {
+  const runs = Bench.loadRuns(ENTRY, (n) => n.startsWith("Mailer/") || n.startsWith("Dot/"));
+  if (!runs.length) return Bench.empty(content);
+  Bench.meta(runs);
+  content.append(...[mailerSection(runs), dotSection(runs)].filter(Boolean));
+});
+</script>
+</body>
+</html>

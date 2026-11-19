@@ -3,8 +3,8 @@
 // It is a separate module so that go-smtp never becomes a dependency of
 // deltasmtp itself.
 //
-// BenchmarkCombined measures client and server as one, each library talking
-// to itself, so no test mixes the two libraries.
+// BenchmarkEndToEnd measures the whole delivery, client and server of the same
+// library, so no test mixes the two libraries.
 //
 // Both libraries run in their fastest configuration: one connection reused
 // for every message, no timeouts, no limits, and every extension that speeds
@@ -312,9 +312,9 @@ func run(b *testing.B, srv serverImpl, c clientImpl, eml []byte) {
 	}
 }
 
-// BenchmarkCombined compares client and server as one, the client of each
-// library sends to its own server. Names are e.g. BenchmarkCombined/Large/GoSMTP.
-func BenchmarkCombined(b *testing.B) {
+// BenchmarkEndToEnd compares the whole delivery, the client of each library
+// sends to its own server. Names are e.g. BenchmarkEndToEnd/Large/GoSMTP.
+func BenchmarkEndToEnd(b *testing.B) {
 	for _, msg := range messages(b) {
 		b.Run(msg.name, func(b *testing.B) {
 			for _, pair := range []struct {

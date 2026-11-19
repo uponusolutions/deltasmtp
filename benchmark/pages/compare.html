@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>deltasmtp vs. go-smtp</title>
+<!--
+  Comparison of deltasmtp and github.com/emersion/go-smtp, published as
+  dev/compare/index.html on gh-pages by benchmark/pages/publish.sh. The
+  benchmarks are in benchmark/compare.
+-->
+<link rel="stylesheet" href="common.css">
+</head>
+<body>
+<div class="viz-root">
+<main>
+  <nav aria-label="Pages">
+    <a href="../bench/">Benchmarks</a>
+    <a href="../compare/" aria-current="page">Comparison with go-smtp</a>
+    <a href="../../coverage/">Coverage</a>
+    <a href="https://github.com/uponusolutions/deltasmtp">Repository</a>
+  </nav>
+  <header>
+    <h1>deltasmtp vs. go-smtp</h1>
+    <p class="secondary">
+      How <a href="https://github.com/uponusolutions/deltasmtp">deltasmtp</a> compares with
+      <a href="https://github.com/emersion/go-smtp">emersion/go-smtp</a>, each in its fastest
+      configuration: one connection reused for every mail, no timeouts or limits, and CHUNKING and
+      PIPELINING where supported. A small (3.5 KB) and a large (13.4 MB) mail are sent to two recipients.
+      The client of each library sends to its own server, the two libraries are never mixed.
+    </p>
+    <p class="muted meta" id="meta"></p>
+  </header>
+  <div id="content"></div>
+</main>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"
+        integrity="sha384-9nhczxUqK87bcKHh20fSQcTGD4qq5GhayNYSYWqwBkINBhOfQLg/P5HG5lF1urn4"
+        crossorigin="anonymous"></script>
+<script src="data.js"></script>
+<script src="common.js"></script>
+<script>
+"use strict";
+const { fmt, el, value } = Bench;
+
+// The entry name is the `name` of github-action-benchmark in the workflow.
+const ENTRY = "Compare with go-smtp";
+
+const ROLES = [
+  {
+    key: "EndToEnd",
+    title: "End to end",
+    text: "The client of each library sends to its own server: deltasmtp with BDAT and pipelining, go-smtp with DATA. This is what a setup built on one library alone gets.",
+  },
+];
+
+const IMPLS = [
+  { key: "DeltaSMTP", label: "deltasmtp", color: "--series-1" },
+  { key: "GoSMTP", label: "go-smtp", color: "--series-2" },
+];
+
+// The marker shape tells the sizes apart, the color the implementations.
+const SIZES = [
+  { key: "Small", label: "small mail", point: "circle" },
+  { key: "Large", label: "large mail", point: "rectRounded" },
+];
+
+const METRICS = [
+  { unit: "ns/op", title: "Time per mail", note: "lower is better, log scale", log: true, format: fmt.time, chart: true },
+  { unit: "MB/s", title: "Throughput", format: fmt.mbs },
+  { unit: "B/op", title: "Memory per mail", note: "lower is better, both sides of the connection", format: fmt.bytes, chart: true },
+  { unit: "allocs/op", title: "Allocations per mail", note: "lower is better, both sides of the connection", format: fmt.count, chart: true },
+];
+
+const name = (role, size, impl) => role.key + "/" + size.key + "/" + impl.key;
+
+function series(role, unit) {
+  return IMPLS.flatMap((impl) => SIZES.map((size) => ({
+    label: impl.label + ", " + size.label,
+    color: impl.color,
+    point: size.point,
+    get: (run) => value(run, name(role, size, impl), unit),
+  })));
+}
+
+function section(role, runs) {
+  const latest = runs[runs.length - 1];
+
+  const tiles = el("div", { class: "tiles" });
+  for (const size of SIZES) {
+    const d = value(latest, name(role, size, IMPLS[0]), "ns/op");
+    const g = value(latest, name(role, size, IMPLS[1]), "ns/op");
+    if (d === undefined || g === undefined) continue;
+    tiles.append(Bench.tile("deltasmtp, " + size.label,
+      fmt.speed(d, g),
+      fmt.time(d) + " vs. " + fmt.time(g) + " per mail with go-smtp"));
+  }
+
+  const rows = SIZES.flatMap((size) => IMPLS.map((impl) => [
+    size.label,
+    el("span", null, Bench.key(impl.color), impl.label),
+    ...METRICS.map((m) => {
+      const v = value(latest, name(role, size, impl), m.unit);
+      return v === undefined ? "–" : m.format(v);
+    }),
+  ]));
+
+  const time = series(role, "ns/op");
+
+  return el("section", { class: "block" },
+    el("h2", null, role.title),
+    el("p", { class: "secondary" }, role.text),
+    tiles,
+    el("h3", null, "Latest run"),
+    Bench.table(["Mail", "Implementation", ...METRICS.map((m) => m.title)], rows, 2),
+    el("h3", null, "Per commit"),
+    el("p", { class: "muted" }, "Click a point to open the commit."),
+    Bench.legend(time),
+    el("div", { class: "charts" }, METRICS.filter((m) => m.chart).map((m) => Bench.lineChart({
+      title: m.title, note: m.note, runs, series: series(role, m.unit), format: m.format, log: m.log,
+    }))),
+    Bench.historyTable("Time per mail of every run", runs, time, fmt.time));
+}
+
+Bench.start((content) => {
+  const runs = Bench.loadRuns(ENTRY, (n) => ROLES.some((r) => n.startsWith(r.key + "/")));
+  if (!runs.length) return Bench.empty(content);
+  Bench.meta(runs);
+  for (const role of ROLES) content.append(section(role, runs));
+});
+</script>
+</body>
+</html>

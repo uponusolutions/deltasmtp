@@ -19,7 +19,7 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: go.sum
       - name: Run benchmark
-        run: export NOSETBYTES=TRUE && go test ./benchmark -bench . -benchtime=10s -run ^$ | tee output.txt
+        run: export NOSETBYTES=TRUE && go test ./benchmark -bench . -benchmem -benchtime=10s -run ^$ | tee output.txt
       - name: Store benchmark result
         uses: benchmark-action/github-action-benchmark@v1
         with:
@@ -27,9 +27,13 @@ jobs:
           output-file-path: output.txt
           fail-on-alert: false
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          auto-push: true
+          # Commits data.js to the local gh-pages branch only, the next step
+          # adds the page and pushes both.
+          auto-push: false
           comment-on-alert: true
           alert-comment-cc-users: "@ml1nk"
+      - name: Publish benchmark page
+        run: benchmark/pages/publish.sh dev/bench bench.html
 
   compare:
     name: Compare with go-smtp
@@ -61,20 +65,4 @@ jobs:
           # adds the page and pushes both.
           auto-push: false
       - name: Publish comparison page
-        # The page of the action shows every benchmark on its own, this one
-        # compares the implementations. The action only creates index.html if
-        # it is missing, so it never overwrites this one.
-        run: |
-          git worktree add "$RUNNER_TEMP/gh-pages" gh-pages
-          cp index.html "$RUNNER_TEMP/gh-pages/dev/compare/index.html"
-          cd "$RUNNER_TEMP/gh-pages"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add dev/compare/index.html
-          git diff --cached --quiet || git commit -m "update comparison page"
-          # Other workflows push to gh-pages as well.
-          for i in 1 2 3 4 5; do
-            git push origin gh-pages:gh-pages && exit 0
-            git pull --rebase origin gh-pages
-          done
-          exit 1
+        run: ../pages/publish.sh dev/compare compare.html
