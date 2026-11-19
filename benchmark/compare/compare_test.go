@@ -3,13 +3,8 @@
 // It is a separate module so that go-smtp never becomes a dependency of
 // deltasmtp itself.
 //
-// BenchmarkClient measures the clients, BenchmarkServer the servers. The other
-// side of the connection is always the same, the deltasmtp implementation,
-// which is the faster one in both roles. That keeps its share of the time
-// small and the same for both contenders, so the difference between the
-// results is the difference between the measured implementations.
 // BenchmarkCombined measures client and server as one, each library talking
-// to itself.
+// to itself, so no test mixes the two libraries.
 //
 // Both libraries run in their fastest configuration: one connection reused
 // for every message, no timeouts, no limits, and every extension that speeds
@@ -314,34 +309,6 @@ func run(b *testing.B, srv serverImpl, c clientImpl, eml []byte) {
 
 	if err := s.close(); err != nil {
 		b.Fatalf("close: %v", err)
-	}
-}
-
-// BenchmarkClient compares the clients, both send to the deltasmtp server.
-// Names are e.g. BenchmarkClient/Large/GoSMTP.
-func BenchmarkClient(b *testing.B) {
-	for _, msg := range messages(b) {
-		b.Run(msg.name, func(b *testing.B) {
-			for _, c := range []clientImpl{deltaClient, goClient} {
-				b.Run(c.name, func(b *testing.B) {
-					run(b, deltaServer, c, msg.eml)
-				})
-			}
-		})
-	}
-}
-
-// BenchmarkServer compares the servers, both receive from the deltasmtp client.
-// Names are e.g. BenchmarkServer/Large/GoSMTP.
-func BenchmarkServer(b *testing.B) {
-	for _, msg := range messages(b) {
-		b.Run(msg.name, func(b *testing.B) {
-			for _, srv := range []serverImpl{deltaServer, goServer} {
-				b.Run(srv.name, func(b *testing.B) {
-					run(b, srv, deltaClient, msg.eml)
-				})
-			}
-		})
 	}
 }
 
