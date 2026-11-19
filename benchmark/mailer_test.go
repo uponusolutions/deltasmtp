@@ -107,6 +107,9 @@ func testServer(bei *backend, opts ...server.Option) (be *backend, s *server.Ser
 		server.WithBackend(be),
 		server.WithMaxLineLength(2000),
 		server.WithHostname("localhost"),
+		// ReuseConn sends every iteration in one session, the default limit of
+		// 1000 transactions would end it after 1000 iterations.
+		server.WithMaxTransactions(0),
 	}
 
 	curOpts = append(curOpts, opts...)
