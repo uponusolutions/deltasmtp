@@ -1076,6 +1076,11 @@ func TestClientPipeliningDefault(t *testing.T) {
 	require.True(t, DefaultConfig().pipelining)
 }
 
+func TestClientBufferSizeDefaults(t *testing.T) {
+	require.Equal(t, 4096, DefaultConfig().readerSize)
+	require.Equal(t, 32<<10, DefaultConfig().writerSize)
+}
+
 func TestClientChunking(t *testing.T) {
 	require.True(t, DefaultConfig().chunking)
 	require.Equal(t, 2<<20, DefaultConfig().chunkingBufferSize)

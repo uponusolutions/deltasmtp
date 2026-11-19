@@ -31,10 +31,12 @@ func DefaultConfig() Config {
 		// line length of 2000).
 		maxResponseLines: 512,
 
-		// Reader buffer of textproto
+		// The client only reads replies, they are small.
 		readerSize: 4096,
-		// Writer buffer of textproto
-		writerSize: 4096,
+		// The message is written through this buffer. DATA writes it line by
+		// line, with 32 KiB a 13 MB message needs about 400 instead of 3300
+		// writes, about 3 times faster. Larger buffers gain little.
+		writerSize: 32 << 10,
 
 		// Use chunking (BDAT) if the server supports it.
 		chunking: true,
@@ -226,14 +228,19 @@ func WithPipelining(enabled bool) Option {
 	}
 }
 
-// WithReaderSize sets the reader size.
+// WithReaderSize sets the size of the read buffer, it holds the replies of
+// the server. Defaults to 4 KiB, zero uses 4 KiB.
 func WithReaderSize(readerSize int) Option {
 	return func(c *Config) {
 		c.readerSize = readerSize
 	}
 }
 
-// WithWriterSize sets the reader size.
+// WithWriterSize sets the size of the write buffer, commands and the message
+// are written through it. Defaults to 32 KiB, zero uses 4 KiB.
+//
+// It is allocated for every connection. A larger buffer means fewer writes
+// for a message sent with DATA.
 func WithWriterSize(writerSize int) Option {
 	return func(c *Config) {
 		c.writerSize = writerSize

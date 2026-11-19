@@ -174,6 +174,14 @@ func New(opts ...Option) *Server {
 		dataTimeout: 10 * time.Minute,
 
 		writeTimeout: 5 * time.Minute,
+
+		// Commands and the message are read through this buffer. DATA is read
+		// line by line, with 32 KiB a 13 MB message needs about 400 instead
+		// of 3300 reads, about 3 times faster. Larger buffers gain little.
+		readerSize: 32 << 10,
+
+		// The server only writes replies, they are small.
+		writerSize: 4096,
 	}
 
 	for _, o := range opts {
@@ -394,14 +402,20 @@ func WithEnforceAuthentication(enforceAuthentication bool) Option {
 	}
 }
 
-// WithReaderSize sets ReaderSize.
+// WithReaderSize sets the size of the read buffer of every connection,
+// commands and the message are read through it. Defaults to 32 KiB, zero uses
+// 4 KiB.
+//
+// It is allocated for every connection. A larger buffer means fewer reads for
+// a message received with DATA or BDAT.
 func WithReaderSize(readerSize int) Option {
 	return func(s *Server) {
 		s.readerSize = readerSize
 	}
 }
 
-// WithWriterSize sets WriterSize.
+// WithWriterSize sets the size of the write buffer of every connection, the
+// replies are written through it. Defaults to 4 KiB, zero uses 4 KiB.
 func WithWriterSize(writerSize int) Option {
 	return func(s *Server) {
 		s.writerSize = writerSize
