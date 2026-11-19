@@ -1,12 +1,17 @@
 // Package compare benchmarks deltasmtp against github.com/emersion/go-smtp.
 //
 // It is a separate module so that go-smtp never becomes a dependency of
-// deltasmtp itself. Every server is benchmarked with every client, so the
-// numbers show both how the servers compare and how the clients compare.
+// deltasmtp itself.
 //
-// Both libraries run in their fastest configuration: no timeouts, no limits,
-// and every extension that speeds up a transaction (deltasmtp: CHUNKING and
-// PIPELINING) enabled.
+// BenchmarkClient measures the clients, BenchmarkServer the servers. The other
+// side of the connection is always the same, the deltasmtp implementation,
+// which is the faster one in both roles. That keeps its share of the time
+// small and the same for both contenders, so the difference between the
+// results is the difference between the measured implementations.
+//
+// Both libraries run in their fastest configuration: one connection reused
+// for every message, no timeouts, no limits, and every extension that speeds
+// up a transaction (CHUNKING and PIPELINING) enabled where it is supported.
 package compare
 
 import (
@@ -49,15 +54,14 @@ type clientImpl struct {
 	dial func(addr string) (sender, error)
 }
 
-var servers = []serverImpl{
-	{name: "DeltaSMTPServer", start: startDeltaServer},
-	{name: "GoSMTPServer", start: startGoServer},
-}
-
-var clients = []clientImpl{
-	{name: "DeltaSMTPClient", dial: dialDelta},
-	{name: "GoSMTPClient", dial: dialGo},
-}
+// The names are the last element of the benchmark names, the benchmark page
+// keys on them.
+var (
+	deltaServer = serverImpl{name: "DeltaSMTP", start: startDeltaServer}
+	goServer    = serverImpl{name: "GoSMTP", start: startGoServer}
+	deltaClient = clientImpl{name: "DeltaSMTP", dial: dialDelta}
+	goClient    = clientImpl{name: "GoSMTP", dial: dialGo}
+)
 
 // listen opens a listener on a random loopback port.
 func listen(b *testing.B) net.Listener {
@@ -255,99 +259,84 @@ func (r *reader) Read(p []byte) (int, error) {
 
 func (r *reader) Len() int { return len(r.b) }
 
-// connection is one connection lifecycle, driving the benchmark loop.
-//
-// Every error inside the loop aborts the benchmark. A failing connection would
-// otherwise race through the iterations and report an excellent — and
-// meaningless — result.
-type connection struct {
+// message is one message the benchmarks send.
+type message struct {
 	name string
-	run  func(b *testing.B, addr string, c clientImpl, body []byte)
+	eml  []byte
 }
 
-var connections = []connection{
-	{
-		name: "ReuseConn",
-		run: func(b *testing.B, addr string, c clientImpl, body []byte) {
-			s, err := c.dial(addr)
-			if err != nil {
-				b.Fatalf("dial: %v", err)
-			}
-
-			for b.Loop() {
-				if err := s.send(body); err != nil {
-					b.Fatalf("send: %v", err)
-				}
-			}
-
-			if err := s.close(); err != nil {
-				b.Fatalf("close: %v", err)
-			}
-		},
-	},
-	{
-		name: "CloseConn",
-		run: func(b *testing.B, addr string, c clientImpl, body []byte) {
-			for b.Loop() {
-				s, err := c.dial(addr)
-				if err != nil {
-					b.Fatalf("dial: %v", err)
-				}
-
-				if err := s.send(body); err != nil {
-					b.Fatalf("send: %v", err)
-				}
-
-				if err := s.close(); err != nil {
-					b.Fatalf("close: %v", err)
-				}
-			}
-		},
-	},
-}
-
-// setBytes reports the message size so the benchmark prints throughput in MB/s.
-// Set NOSETBYTES=1 to suppress it.
-func setBytes(b *testing.B, eml []byte) {
+// messages reads the messages of the main benchmarks, an embed can not leave
+// the module.
+func messages(b *testing.B) []message {
 	b.Helper()
 
-	if os.Getenv("NOSETBYTES") != "" {
-		return
-	}
+	msgs := []message{{name: "Small"}, {name: "Large"}}
+	files := []string{"small.eml", "large.eml"}
 
-	b.SetBytes(int64(len(eml)))
-}
-
-// BenchmarkCompare runs every client against every server. The names are
-// paths, e.g. Large/ReuseConn/DeltaSMTPServer/GoSMTPClient, which can be
-// filtered with -bench 'Compare/Large/.*/DeltaSMTPServer'.
-func BenchmarkCompare(b *testing.B) {
-	for _, msg := range []struct{ name, file string }{
-		{name: "Small", file: "small.eml"},
-		{name: "Large", file: "large.eml"},
-	} {
-		// The messages of the main benchmarks, an embed can not leave the module.
-		eml, err := os.ReadFile(filepath.Join("..", "testdata", msg.file))
+	for i := range msgs {
+		eml, err := os.ReadFile(filepath.Join("..", "testdata", files[i]))
 		if err != nil {
 			b.Fatalf("read testdata: %v", err)
 		}
 
-		b.Run(msg.name, func(b *testing.B) {
-			for _, conn := range connections {
-				b.Run(conn.name, func(b *testing.B) {
-					for _, srv := range servers {
-						b.Run(srv.name, func(b *testing.B) {
-							addr, stop := srv.start(b)
-							defer stop()
+		msgs[i].eml = eml
+	}
 
-							for _, c := range clients {
-								b.Run(c.name, func(b *testing.B) {
-									setBytes(b, eml)
-									conn.run(b, addr, c, eml)
-								})
-							}
-						})
-					}
+	return msgs
+}
+
+// run sends the message over one connection reused for every iteration.
+//
+// Every error inside the loop aborts the benchmark. A failing connection would
+// otherwise race through the iterations and report an excellent — and
+// meaningless — result.
+func run(b *testing.B, srv serverImpl, c clientImpl, eml []byte) {
+	b.Helper()
+
+	addr, stop := srv.start(b)
+	defer stop()
+
+	s, err := c.dial(addr)
+	if err != nil {
+		b.Fatalf("dial: %v", err)
+	}
+
+	b.SetBytes(int64(len(eml)))
+	b.ReportAllocs()
+
+	for b.Loop() {
+		if err := s.send(eml); err != nil {
+			b.Fatalf("send: %v", err)
+		}
+	}
+
+	if err := s.close(); err != nil {
+		b.Fatalf("close: %v", err)
+	}
+}
+
+// BenchmarkClient compares the clients, both send to the deltasmtp server.
+// Names are e.g. BenchmarkClient/Large/GoSMTP.
+func BenchmarkClient(b *testing.B) {
+	for _, msg := range messages(b) {
+		b.Run(msg.name, func(b *testing.B) {
+			for _, c := range []clientImpl{deltaClient, goClient} {
+				b.Run(c.name, func(b *testing.B) {
+					run(b, deltaServer, c, msg.eml)
+				})
+			}
+		})
+	}
+}
+
+// BenchmarkServer compares the servers, both receive from the deltasmtp client.
+// Names are e.g. BenchmarkServer/Large/GoSMTP.
+func BenchmarkServer(b *testing.B) {
+	for _, msg := range messages(b) {
+		b.Run(msg.name, func(b *testing.B) {
+			for _, srv := range []serverImpl{deltaServer, goServer} {
+				b.Run(srv.name, func(b *testing.B) {
+					run(b, srv, deltaClient, msg.eml)
 				})
 			}
 		})

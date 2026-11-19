@@ -179,8 +179,8 @@ it off.
 
 Benchmarks run in CI and are published on the
 [benchmark page](https://uponusolutions.github.io/deltasmtp/dev/bench/), the
-comparison with [go-smtp](https://github.com/emersion/go-smtp) (every client
-against every server, both in their fastest configuration) on the
+comparison with [go-smtp](https://github.com/emersion/go-smtp) (client and
+server with a small and a large mail, both in their fastest configuration) on the
 [comparison page](https://uponusolutions.github.io/deltasmtp/dev/compare/); coverage
 is on the [coverage page](https://uponusolutions.github.io/deltasmtp/coverage/).
 
