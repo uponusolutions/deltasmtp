@@ -230,7 +230,7 @@ make stats   # benchstat over .bench/*.txt
 ```
 
 `.devcontainer/` holds a development container for [Devsy](https://devsy.sh)
-with everything above (Go 1.27.4 on Alpine, gcc for the race detector, the
+with everything above (Go 1.27.4 on Debian, gcc for the race detector, the
 tools of `go.tool.mod`). The developer has no root: no sudo, no setuid
 binaries, no capabilities. There is no ssh client and `SSH_AUTH_SOCK` is
 cleared, push from the host. SSH agent forwarding is a client setting, turn it
