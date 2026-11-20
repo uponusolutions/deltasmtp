@@ -1196,9 +1196,7 @@ func (c *Conn) greet() {
 }
 
 func (c *Conn) writeStatus(status *deltasmtp.Status) {
-	c.logger().DebugContext(
-		c.ctx, "write status", slog.Any("status", status),
-	)
+	c.logger().LogAttrs(c.ctx, slog.LevelDebug, "write status", slog.Any("status", status))
 
 	_, err := status.WriteTo(c.sender)
 
@@ -1252,7 +1250,7 @@ func (c *Conn) handshake(tlsConn *tls.Conn) error {
 func (c *Conn) readLine() (string, error) {
 	line, err := c.receiver.ReadFullLine()
 	if err == nil {
-		c.logger().DebugContext(c.ctx, "read", slog.String("line", line))
+		c.logger().LogAttrs(c.ctx, slog.LevelDebug, "read", slog.String("line", line))
 	}
 	return line, err
 }
