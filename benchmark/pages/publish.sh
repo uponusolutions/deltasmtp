@@ -16,6 +16,8 @@ wt="${RUNNER_TEMP:-$(mktemp -d)}/gh-pages-$$"
 git worktree add "$wt" gh-pages
 mkdir -p "$wt/$dir"
 cp "$src/$page" "$wt/$dir/index.html"
+# e.g. dev/bench -> ../../, the menu links are relative to the site root
+"$src/inject-nav.sh" "$wt/$dir/index.html" "$(echo "$dir" | sed 's|[^/]*|..|g')/" "${page%.html}"
 cp "$src/common.css" "$src/common.js" "$wt/$dir/"
 
 cd "$wt"

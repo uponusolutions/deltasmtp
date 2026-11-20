@@ -22,7 +22,10 @@ jobs:
         run: go test ./... -tags cover -coverprofile=./cover.out -covermode=atomic -coverpkg=./...
       - name: generate html
         if: github.ref == 'refs/heads/main'
-        run: mkdir coverage && go tool -modfile=go.tool.mod cover -html=cover.out -o=coverage/index.html
+        run: |
+          mkdir coverage && go tool -modfile=go.tool.mod cover -html=cover.out -o=coverage/index.html
+          # the menu of the benchmark pages
+          benchmark/pages/inject-nav.sh coverage/index.html ../ coverage
       - name: Deploy
         if: github.ref == 'refs/heads/main'
         uses: peaceiris/actions-gh-pages@v4
