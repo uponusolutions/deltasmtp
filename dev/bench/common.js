@@ -130,6 +130,28 @@ const Bench = (() => {
       (good ? "▼ " : "▲ ") + fmt.percent(p) + (good ? " faster" : " slower") + " than the previous run");
   }
 
+  // change is the compact form of delta for table cells, e.g. "▼ 2.1%".
+  // The direction carries the meaning with the color, lower is better.
+  function change(cur, prev) {
+    if (cur === undefined || prev === undefined) return "–";
+    const p = (cur - prev) / prev * 100;
+    if (Math.abs(p) < 0.05) return el("span", { class: "delta" }, "± 0%");
+    const good = p < 0;
+    return el("span", {
+      class: "delta " + (good ? "good" : "bad"),
+      title: (good ? "faster" : "slower") + " than the previous run",
+    }, (good ? "▼ " : "▲ ") + fmt.percent(p));
+  }
+
+  // previous returns the latest run before the last one that has a value for
+  // name, the run to compare the last one with.
+  function previous(runs, name, unit) {
+    for (let i = runs.length - 2; i >= 0; i--) {
+      if (value(runs[i], name, unit) !== undefined) return runs[i];
+    }
+    return undefined;
+  }
+
   function tile(label, val, ...details) {
     return el("div", { class: "tile" },
       el("div", { class: "label" }, label),
@@ -341,7 +363,7 @@ const Bench = (() => {
   }
 
   return {
-    fmt, cssVar, el, loadRuns, value, meta, filter, delta, tile, key, table,
+    fmt, cssVar, el, loadRuns, value, previous, meta, filter, delta, change, tile, key, table,
     historyTable, legend, lineChart, start, empty,
   };
 })();

@@ -77,10 +77,6 @@ a { color: inherit; }
 .secondary { color: var(--text-secondary); }
 .muted { color: var(--text-muted); font-size: 12px; }
 
-nav { display: flex; flex-wrap: wrap; gap: 4px 20px; margin-bottom: 20px; color: var(--text-secondary); }
-nav a { text-decoration: none; }
-nav a:hover { text-decoration: underline; }
-nav a[aria-current="page"] { color: var(--text-primary); font-weight: 600; }
 header { margin-bottom: 24px; }
 header p { max-width: 80ch; }
 header .meta { margin-top: 8px; }

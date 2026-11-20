@@ -13,12 +13,57 @@
 <body>
 <div class="viz-root">
 <main>
-  <nav aria-label="Pages">
-    <a href="../bench/" aria-current="page">Benchmarks</a>
-    <a href="../compare/">Comparison with go-smtp</a>
-    <a href="../../coverage/">Coverage</a>
-    <a href="https://github.com/uponusolutions/deltasmtp">Repository</a>
-  </nav>
+<!--
+  The menu of all pages on gh-pages, inserted by inject-nav.sh: the benchmark
+  pages at their site-nav marker comment, the coverage report of go tool cover
+  right after the body tag. The root placeholder is the path to the site root.
+
+  Links marked with ↗ open a page without this menu in a new tab, so the page
+  with the menu stays open.
+-->
+<style>
+  .site-nav {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 20px;
+    margin-bottom: 20px;
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: var(--text-secondary, #52514e);
+  }
+  .site-nav a { color: inherit; text-decoration: none; }
+  .site-nav a:hover { text-decoration: underline; }
+  .site-nav a[aria-current="page"] { color: var(--text-primary, #0b0b0b); font-weight: 600; }
+  .site-nav .sep { width: 1px; height: 16px; background: var(--axis, #c3c2b7); }
+  .site-nav .sr {
+    position: absolute; width: 1px; height: 1px; overflow: hidden;
+    clip-path: inset(50%); white-space: nowrap;
+  }
+
+  /* The coverage report: a bar above its own fixed bar with the file selector. */
+  .site-nav:has(+ #topbar) {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 1;
+    height: 36px; margin: 0; padding: 0 12px;
+    background: #1a1a19; color: #c3c2b7; border-bottom: 1px solid #383835;
+    font-weight: normal;
+  }
+  .site-nav:has(+ #topbar) a[aria-current="page"] { color: #f0efec; }
+  .site-nav:has(+ #topbar) .sep { background: #52514e; }
+  .site-nav:has(+ #topbar) ~ #topbar { top: 37px; }
+  .site-nav:has(+ #topbar) ~ #content { margin-top: 87px; }
+  /* The report jumps to the shown file (location.hash), keep it below the bars. */
+  .site-nav:has(+ #topbar) ~ #content .file { scroll-margin-top: 87px; }
+</style>
+<nav class="site-nav" aria-label="Pages">
+  <a href="../../dev/bench/" data-page="bench" aria-current="page">Benchmarks</a>
+  <a href="../../dev/compare/" data-page="compare">Comparison with go-smtp</a>
+  <a href="../../coverage/" data-page="coverage">Coverage</a>
+  <span class="sep" aria-hidden="true"></span>
+  <a href="https://pkg.go.dev/github.com/uponusolutions/deltasmtp" target="_blank" rel="noopener"
+     title="Opens pkg.go.dev in a new tab, without this menu">Docs <span aria-hidden="true">↗</span><span class="sr"> (opens in a new tab)</span></a>
+  <a href="https://github.com/uponusolutions/deltasmtp" target="_blank" rel="noopener"
+     title="Opens GitHub in a new tab, without this menu">Repository <span aria-hidden="true">↗</span><span class="sr"> (opens in a new tab)</span></a>
+</nav>
   <header>
     <h1>deltasmtp benchmarks</h1>
     <p class="secondary">
@@ -54,10 +99,11 @@ function filter(id, label, options) {
   return Bench.filter(label, options, state[id], (k) => { state[id] = k; redraw(); });
 }
 
-// tiles of the previous run where it has values, to show the change.
-function previous(runs, has) {
-  for (let i = runs.length - 2; i >= 0; i--) if (has(runs[i])) return runs[i];
-  return undefined;
+// sinceLast returns the value of name in the last run and the change since
+// the previous run that has it.
+function sinceLast(runs, name, unit) {
+  const v = value(runs[runs.length - 1], name, unit);
+  return { v, change: Bench.change(v, value(Bench.previous(runs, name, unit), name, unit)) };
 }
 
 // --- Mailer: BenchmarkMailer in benchmark/mailer_test.go ---
@@ -95,30 +141,41 @@ function mailerSection(allRuns) {
 
   const latest = runs[runs.length - 1];
   const def = MAIL_CONFIGS[0];
-  const plain = MAIL_CONFIGS[3];
 
   const tiles = el("div", { class: "tiles" });
   for (const size of SIZES) {
-    const t = value(latest, mailName(size, def), "ns/op");
+    const name = mailName(size, def);
+    const t = value(latest, name, "ns/op");
     if (t === undefined) continue;
-    const prev = previous(runs, (r) => value(r, mailName(size, def), "ns/op") !== undefined);
-    const p = value(latest, mailName(size, plain), "ns/op");
+    const prev = Bench.previous(runs, name, "ns/op");
     tiles.append(Bench.tile(size.label + " (" + size.text + "), default settings", fmt.time(t),
-      Bench.delta(t, value(prev, mailName(size, def), "ns/op")),
-      p === undefined ? null : fmt.speed(t, p) + " than plain DATA (" + fmt.time(p) + ")"));
+      Bench.delta(t, value(prev, name, "ns/op"))));
   }
 
-  const units = ["ns/op", "B/op", "allocs/op"].filter((u) =>
+  // Time with its change since the previous run, then memory and allocations.
+  const extra = ["B/op", "allocs/op"].filter((u) =>
     SIZES.some((s) => value(latest, mailName(s, def), u) !== undefined));
-  const unitTitle = { "ns/op": "time", "B/op": "memory", "allocs/op": "allocations" };
-  const unitFmt = { "ns/op": fmt.time, "B/op": fmt.bytes, "allocs/op": fmt.count };
+  const extraTitle = { "B/op": "memory", "allocs/op": "allocations" };
+  const extraFmt = { "B/op": fmt.bytes, "allocs/op": fmt.count };
+
+  const head = ["Protocol", ...SIZES.flatMap((s) => {
+    const short = s.label.split(" ")[0];
+    return [short + ", time", "Change", ...extra.map((u) => short + ", " + extraTitle[u])];
+  })];
 
   const rows = MAIL_CONFIGS.map((c) => [
     el("span", null, Bench.key(c.color), c.label),
-    ...SIZES.flatMap((s) => units.map((u) => {
-      const v = value(latest, mailName(s, c), u);
-      return v === undefined ? "–" : unitFmt[u](v);
-    })),
+    ...SIZES.flatMap((s) => {
+      const { v, change } = sinceLast(runs, mailName(s, c), "ns/op");
+      return [
+        v === undefined ? "–" : fmt.time(v),
+        change,
+        ...extra.map((u) => {
+          const x = value(latest, mailName(s, c), u);
+          return x === undefined ? "–" : extraFmt[u](x);
+        }),
+      ];
+    }),
   ]);
 
   const series = (size) => MAIL_CONFIGS.map((c) => ({
@@ -135,7 +192,8 @@ function mailerSection(allRuns) {
     filters,
     tiles,
     el("h3", null, "Latest run"),
-    Bench.table(["Protocol", ...SIZES.flatMap((s) => units.map((u) => s.label.split(" ")[0] + ", " + unitTitle[u]))], rows),
+    el("p", { class: "muted" }, "The change is relative to the previous run."),
+    Bench.table(head, rows),
     el("h3", null, "Time per mail, per commit"),
     el("p", { class: "muted" }, "Lower is better. Click a point to open the commit."),
     Bench.legend(series(SIZES[0])),
@@ -155,10 +213,10 @@ const DIRECTIONS = [
   { key: "Write", label: "Writing", text: "encoding a message to send" },
 ];
 
-const DOT_IMPLS = [
-  { key: "Fork", label: "deltasmtp", color: "--series-1", point: "circle" },
-  { key: "Upstream", label: "net/textproto", color: "--series-2", point: "rectRounded" },
-];
+// The benchmark also runs net/textproto (Upstream) for local comparisons,
+// the page only follows deltasmtp (Fork).
+const dotName = (dir, body, source) =>
+  ["Dot", dir.key, body || state.body, source || state.source, "Fork"].join("/");
 
 const BODIES = [
   { key: "Text", label: "Text" },
@@ -170,8 +228,8 @@ const SOURCES = [
   { key: "BufferReader", label: "io.Reader only" },
 ];
 
-const dotName = (dir, impl, body, source) =>
-  ["Dot", dir.key, body || state.body, source || state.source, impl.key].join("/");
+// throughput of the 4 MiB body moved in ns nanoseconds.
+const throughput = (ns) => fmt.mbs(DOT_BYTES / ns * 1e3);
 
 function dotSection(allRuns) {
   const runs = allRuns.filter((r) => Object.keys(r.values).some((n) => n.startsWith("Dot/")));
@@ -182,19 +240,16 @@ function dotSection(allRuns) {
     filter("source", "Source", SOURCES));
 
   const latest = runs[runs.length - 1];
-  const [fork, upstream] = DOT_IMPLS;
 
   const tiles = el("div", { class: "tiles" });
   for (const dir of DIRECTIONS) {
-    const f = value(latest, dotName(dir, fork), "ns/op");
-    const u = value(latest, dotName(dir, upstream), "ns/op");
-    if (f === undefined || u === undefined) continue;
-    const prev = previous(runs, (r) => value(r, dotName(dir, fork), "ns/op") !== undefined);
-    tiles.append(Bench.tile(dir.label + ", " + dir.text,
-      fmt.speed(f, u),
-      fmt.time(f) + " vs. " + fmt.time(u) + " with net/textproto for 4 MiB, " +
-        fmt.mbs(DOT_BYTES / f * 1e3) + " vs. " + fmt.mbs(DOT_BYTES / u * 1e3),
-      Bench.delta(f, value(prev, dotName(dir, fork), "ns/op"))));
+    const name = dotName(dir);
+    const t = value(latest, name, "ns/op");
+    if (t === undefined) continue;
+    const prev = Bench.previous(runs, name, "ns/op");
+    tiles.append(Bench.tile(dir.label + ", " + dir.text, fmt.time(t),
+      Bench.delta(t, value(prev, name, "ns/op")),
+      throughput(t) + " for a 4 MiB body"));
   }
 
   // The table view lists every variant, independent of the filters.
@@ -202,39 +257,38 @@ function dotSection(allRuns) {
   for (const dir of DIRECTIONS) {
     for (const body of BODIES) {
       for (const source of SOURCES) {
-        const f = value(latest, dotName(dir, fork, body.key, source.key), "ns/op");
-        const u = value(latest, dotName(dir, upstream, body.key, source.key), "ns/op");
+        const { v, change } = sinceLast(runs, dotName(dir, body.key, source.key), "ns/op");
         rows.push([dir.label, body.label, source.label,
-          f === undefined ? "–" : fmt.time(f),
-          u === undefined ? "–" : fmt.time(u),
-          f === undefined || u === undefined ? "–" : fmt.ratio(u / f)]);
+          v === undefined ? "–" : fmt.time(v),
+          v === undefined ? "–" : throughput(v),
+          change]);
       }
     }
   }
 
-  const series = (dir) => DOT_IMPLS.map((impl) => ({
-    label: impl.label, color: impl.color, point: impl.point,
-    get: (run) => value(run, dotName(dir, impl), "ns/op"),
+  const series = DIRECTIONS.map((dir, i) => ({
+    label: dir.label, color: "--series-" + (i + 1), point: i === 0 ? "circle" : "rectRounded",
+    get: (run) => value(run, dotName(dir), "ns/op"),
   }));
 
   return el("section", { class: "block" },
     el("h2", null, "Dot encoding"),
     el("p", { class: "secondary" },
       "DATA ends a message with a line holding a single dot, so lines starting with a dot get a second one. " +
-      "deltasmtp encodes and decodes this itself instead of using net/textproto from the Go standard library. " +
-      "The benchmark moves a 4 MiB body, text has a dot at the start of every eighth line, binary data " +
-      "has none. bytes.Reader hands the whole body over at once, a plain io.Reader in 32 KiB steps."),
+      "The benchmark encodes and decodes a 4 MiB body, text has a dot at the start of every eighth line, " +
+      "binary data has none. bytes.Reader hands the whole body over at once, a plain io.Reader in 32 KiB steps."),
     filters,
     tiles,
     el("h3", null, "Latest run, every variant"),
-    Bench.table(["Direction", "Body", "Source", "deltasmtp", "net/textproto", "Speedup"], rows, 3),
+    el("p", { class: "muted" }, "The change is relative to the previous run."),
+    Bench.table(["Direction", "Body", "Source", "Time", "Throughput", "Change"], rows, 3),
     el("h3", null, "Time per 4 MiB body, per commit"),
-    el("p", { class: "muted" }, "Lower is better, log scale. Click a point to open the commit."),
-    Bench.legend(series(DIRECTIONS[0])),
-    el("div", { class: "charts" }, DIRECTIONS.map((dir) => Bench.lineChart({
-      title: dir.label, note: dir.text, runs, series: series(dir), format: fmt.time, log: true,
-    }))),
-    DIRECTIONS.map((dir) => Bench.historyTable(dir.label + ", time of every run", runs, series(dir), fmt.time)));
+    el("p", { class: "muted" }, "Lower is better. Click a point to open the commit."),
+    Bench.legend(series),
+    el("div", { class: "charts" }, Bench.lineChart({
+      title: "Reading and writing", note: "4 MiB body", runs, series, format: fmt.time,
+    })),
+    Bench.historyTable("Time of every run", runs, series, fmt.time));
 }
 
 redraw = Bench.start((content) => {
