@@ -3,9 +3,11 @@
     "golangci-lint": {
       "initialization_options": {
         "command": [
-          "go",
-          "tool",
-          "-modfile=go.tool.mod",
+          // Nested modules (benchmark/compare) run from their own directory,
+          // so resolve go.tool.mod from the repository root.
+          "sh",
+          "-c",
+          "exec go tool -modfile=\"$(git rev-parse --show-toplevel)/go.tool.mod\" golangci-lint \"$@\"",
           "golangci-lint",
           "run",
           "--output.json.path",
