@@ -1549,10 +1549,10 @@ var chunkingBuffers sync.Pool
 // getChunkingBuffer returns a buffer of at least size bytes from the pool,
 // or a new one. A pooled buffer that is too small is left to the GC.
 func getChunkingBuffer(size int) *[]byte <span class="cov2" title="5">{
-        if b, ok := chunkingBuffers.Get().(*[]byte); ok &amp;&amp; cap(*b) &gt;= size </span><span class="cov1" title="2">{
+        if b, ok := chunkingBuffers.Get().(*[]byte); ok &amp;&amp; cap(*b) &gt;= size </span><span class="cov2" title="3">{
                 return b
         }</span>
-        <span class="cov2" title="3">b := make([]byte, size)
+        <span class="cov1" title="2">b := make([]byte, size)
         return &amp;b</span>
 }
 
@@ -1783,20 +1783,20 @@ func Set(conn net.Conn, timeout time.Duration) <span class="cov9" title="309819"
 }</span>
 
 // SetRead sets the read deadline of conn to now plus timeout.
-func SetRead(conn net.Conn, timeout time.Duration) <span class="cov9" title="222098">{
+func SetRead(conn net.Conn, timeout time.Duration) <span class="cov9" title="221368">{
         _ = conn.SetReadDeadline(at(timeout))
 }</span>
 
 // SetWrite sets the write deadline of conn to now plus timeout.
-func SetWrite(conn net.Conn, timeout time.Duration) <span class="cov9" title="222098">{
+func SetWrite(conn net.Conn, timeout time.Duration) <span class="cov9" title="221369">{
         _ = conn.SetWriteDeadline(at(timeout))
 }</span>
 
-func at(timeout time.Duration) time.Time <span class="cov10" title="754018">{
+func at(timeout time.Duration) time.Time <span class="cov10" title="752559">{
         if timeout &lt;= 0 </span><span class="cov3" title="32">{
                 return time.Time{}
         }</span>
-        <span class="cov9" title="753986">return time.Now().Add(timeout)</span>
+        <span class="cov9" title="752527">return time.Now().Add(timeout)</span>
 }
 </pre>
 		
@@ -1822,7 +1822,7 @@ func CutPrefixFold(s, prefix string) (string, bool) <span class="cov7" title="15
 
 // Cmd parses a line and returns the command, argument or an error.
 // Command is converted to upper case.
-func Cmd(line string) (cmd string, arg string, err error) <span class="cov8" title="219782">{
+func Cmd(line string) (cmd string, arg string, err error) <span class="cov8" title="219052">{
         line = strings.TrimRight(line, "\r\n")
 
         l := len(line)
@@ -1831,7 +1831,7 @@ func Cmd(line string) (cmd string, arg string, err error) <span class="cov8" tit
                 return "", "", nil</span>
         case l &lt; 4:<span class="cov1" title="1">
                 return "", "", fmt.Errorf("command too short: %q", line)</span>
-        case l == 4:<span class="cov7" title="65159">
+        case l == 4:<span class="cov7" title="64429">
                 return strings.ToUpper(line), "", nil</span>
         case l == 5:<span class="cov0" title="0">
                 // Too long to be only command, too short to have args
@@ -2438,22 +2438,22 @@ const (
 // elide leading dots and detect End-of-Data
 // (&lt;CR&gt;&lt;LF&gt;.&lt;CR&gt;&lt;LF&gt;) line.
 // nolint:revive
-func (r *dot) Read(b []byte) (int, error) <span class="cov9" title="1192877">{
+func (r *dot) Read(b []byte) (int, error) <span class="cov9" title="1192876">{
         if r.state == stateEOF </span><span class="cov6" title="4208">{
                 return 0, io.EOF
         }</span>
 
-        <span class="cov9" title="1188669">if r.limited </span><span class="cov4" title="118">{
+        <span class="cov9" title="1188668">if r.limited </span><span class="cov4" title="117">{
                 if r.n &lt;= 0 </span><span class="cov2" title="17">{
                         return 0, deltasmtp.ErrDataTooLarge
                 }</span>
 
-                <span class="cov3" title="101">if int64(len(b)) &gt; r.n </span><span class="cov2" title="22">{
+                <span class="cov3" title="100">if int64(len(b)) &gt; r.n </span><span class="cov2" title="22">{
                         b = b[0:r.n]
                 }</span>
         }
 
-        <span class="cov9" title="1188652">var n int       // Data written to b.
+        <span class="cov9" title="1188651">var n int       // Data written to b.
         var skipped int // How many.
 
         c, err := r.peek(len(b))
@@ -2497,17 +2497,17 @@ func (r *dot) Read(b []byte) (int, error) <span class="cov9" title="1192877">{
                         c = c[1:]</span>
                 }
                 <span class="cov6" title="8297">r.state = stateLine</span>
-        default:<span class="cov9" title="1180339"></span>
+        default:<span class="cov9" title="1180338"></span>
         }
 
-        <span class="cov9" title="1188638">for </span><span class="cov10" title="1253421">{
+        <span class="cov9" title="1188637">for </span><span class="cov10" title="1253420">{
                 i := bytes.Index(c, deltasmtp.Crlfdot)
 
                 // No full \r\n. found.
-                if i == -1 </span><span class="cov9" title="1183978">{
+                if i == -1 </span><span class="cov9" title="1183977">{
                         l := len(c)
 
-                        if l &gt; 1 &amp;&amp; c[l-2] == '\r' &amp;&amp; c[l-1] == '\n' &amp;&amp; err == nil </span><span class="cov7" title="14692">{
+                        if l &gt; 1 &amp;&amp; c[l-2] == '\r' &amp;&amp; c[l-1] == '\n' &amp;&amp; err == nil </span><span class="cov7" title="14691">{
                                 // Ends with \r\n, write everything before.
                                 n += copy(b, c[:l-2])
                         }</span> else<span class="cov9" title="1169286"> if l &gt; 0 &amp;&amp; c[l-1] == '\r' &amp;&amp; err == nil </span><span class="cov6" title="2959">{
@@ -2517,7 +2517,7 @@ func (r *dot) Read(b []byte) (int, error) <span class="cov9" title="1192877">{
                                 n += copy(b, c)
                         }</span>
 
-                        <span class="cov9" title="1183978">break</span>
+                        <span class="cov9" title="1183977">break</span>
                 }
 
                 // i is \r, \n.\r\n needs to be accessible
@@ -2564,20 +2564,20 @@ func (r *dot) Read(b []byte) (int, error) <span class="cov9" title="1192877">{
                 c = c[i+3:]</span>
         }
 
-        <span class="cov9" title="1188638">return r.finalize(n, skipped, err)</span>
+        <span class="cov9" title="1188637">return r.finalize(n, skipped, err)</span>
 }
 
-func (r *dot) finalize(n int, skipped int, err error) (int, error) <span class="cov9" title="1188652">{
+func (r *dot) finalize(n int, skipped int, err error) (int, error) <span class="cov9" title="1188651">{
         // n + skipped is always smaller then what was peeked,
         // so it is guaranteed to work
         _, _ = r.r.Discard(n + skipped)
 
-        if r.limited </span><span class="cov3" title="101">{
+        if r.limited </span><span class="cov3" title="100">{
                 r.n -= int64(n)
         }</span>
 
         // as long as something was written, we do not propagate the err if any
-        <span class="cov9" title="1188652">if n &gt; 0 </span><span class="cov9" title="1184527">{
+        <span class="cov9" title="1188651">if n &gt; 0 </span><span class="cov9" title="1184526">{
                 return n, nil
         }</span>
 
@@ -2590,7 +2590,7 @@ func (r *dot) finalize(n int, skipped int, err error) (int, error) <span class="
         <span class="cov6" title="4125">return n, err</span>
 }
 
-func (r *dot) peek(blen int) ([]byte, error) <span class="cov9" title="1188652">{
+func (r *dot) peek(blen int) ([]byte, error) <span class="cov9" title="1188651">{
         minimumPeek := 5
         if r.state == stateBegin </span><span class="cov6" title="8309">{
                 minimumPeek = 3
@@ -2599,11 +2599,11 @@ func (r *dot) peek(blen int) ([]byte, error) <span class="cov9" title="1188652">
         // IMPORTANT: We cannot wait on read,
         // because no EOL returns. So we call peek with minimumPeek to fill the buffer probably with more
         // to get as much data as possible in the second peek.
-        <span class="cov9" title="1188652">if r.r.Buffered() &lt; minimumPeek </span><span class="cov9" title="1046401">{
+        <span class="cov9" title="1188651">if r.r.Buffered() &lt; minimumPeek </span><span class="cov9" title="1046400">{
                 _, _ = r.r.Peek(minimumPeek)
         }</span>
         // min 5, max buffer size, default len(b)
-        <span class="cov9" title="1188652">return r.r.Peek(max(min(blen, r.r.Buffered()), minimumPeek))</span>
+        <span class="cov9" title="1188651">return r.r.Peek(max(min(blen, r.r.Buffered()), minimumPeek))</span>
 }
 </pre>
 		
@@ -2638,12 +2638,12 @@ func NewReceiver(
         readerSize int,
         maxLineLength int,
         maxResponseLines int,
-) *Receiver <span class="cov6" title="2298">{
+) *Receiver <span class="cov6" title="2299">{
         if readerSize == 0 </span><span class="cov0" title="0">{
                 readerSize = 4096 // default
         }</span>
 
-        <span class="cov6" title="2298">return &amp;Receiver{
+        <span class="cov6" title="2299">return &amp;Receiver{
                 Reader:             bufio.NewReaderSize(conn, readerSize),
                 maxLineLength:      maxLineLength,
                 maxResponseLines:   maxResponseLines,
@@ -2660,7 +2660,7 @@ func (t *Receiver) Reset(conn io.Reader) <span class="cov4" title="160">{
 
 // ReadFullLine reads a single line from r,
 // eliding the final \n or \r\n from the returned string.
-func (t *Receiver) ReadFullLine() (string, error) <span class="cov9" title="383322">{
+func (t *Receiver) ReadFullLine() (string, error) <span class="cov9" title="382592">{
         line, err := t.readLineSlice()
         return string(line), err
 }</span>
@@ -2839,26 +2839,26 @@ func IsCodeUnexpected(code int, expectCode int) bool <span class="cov9" title="1
                 100 &lt;= expectCode &amp;&amp; expectCode &lt; 1000 &amp;&amp; code != expectCode
 }</span>
 
-func (t *Receiver) readLineSlice() ([]byte, error) <span class="cov9" title="383322">{
+func (t *Receiver) readLineSlice() ([]byte, error) <span class="cov9" title="382592">{
         // If the line limit was exceeded once, the connection shouldn't be used anymore.
         if t.lineLengthExceeded </span><span class="cov1" title="1">{
                 return nil, deltasmtp.ErrTooLongLine
         }</span>
 
-        <span class="cov9" title="383321">var line []byte
-        for </span><span class="cov9" title="387379">{
+        <span class="cov9" title="382591">var line []byte
+        for </span><span class="cov9" title="386649">{
                 l, more, err := t.ReadLine()
-                if err != nil </span><span class="cov6" title="2130">{
+                if err != nil </span><span class="cov6" title="2140">{
                         return nil, err
                 }</span>
 
-                <span class="cov9" title="385238">if t.maxLineLength &gt; 0 &amp;&amp; len(l)+len(line) &gt; t.maxLineLength </span><span class="cov2" title="5">{
+                <span class="cov9" title="384508">if t.maxLineLength &gt; 0 &amp;&amp; len(l)+len(line) &gt; t.maxLineLength </span><span class="cov2" title="5">{
                         t.lineLengthExceeded = true
                         return nil, deltasmtp.ErrTooLongLine
                 }</span>
 
                 // Avoid the copy if the first call produced a full line.
-                <span class="cov9" title="385233">if line == nil &amp;&amp; !more </span><span class="cov9" title="379141">{
+                <span class="cov9" title="384503">if line == nil &amp;&amp; !more </span><span class="cov9" title="378411">{
                         return l, nil
                 }</span>
                 <span class="cov7" title="6092">line = append(line, l...)
@@ -3312,12 +3312,12 @@ type Sender struct {
 func NewSender(
         conn io.Writer,
         writerSize int,
-) *Sender <span class="cov10" title="2286">{
+) *Sender <span class="cov10" title="2287">{
         if writerSize == 0 </span><span class="cov0" title="0">{
                 writerSize = 4096 // default
         }</span>
 
-        <span class="cov10" title="2286">return &amp;Sender{
+        <span class="cov10" title="2287">return &amp;Sender{
                 Writer: bufio.NewWriterSize(conn, writerSize),
         }</span>
 }
@@ -4639,17 +4639,17 @@ func (c *Conn) run() (err error) <span class="cov6" title="2186">{
         )
         c.greet()
 
-        for </span><span class="cov9" title="221911">{
+        for </span><span class="cov9" title="221181">{
                 c.renewReadDeadline()
                 cmd, arg, err = c.nextCommand()
-                if err != nil </span><span class="cov6" title="2130">{
+                if err != nil </span><span class="cov6" title="2140">{
                         return err
                 }</span>
 
-                <span class="cov9" title="219770">err = c.handle(cmd, arg)
-                if err != nil </span><span class="cov9" title="219702">{
+                <span class="cov9" title="219040">err = c.handle(cmd, arg)
+                if err != nil </span><span class="cov9" title="218972">{
                         // if error is a smtp status it isn't necessary to close the connection
-                        if smtpErr, ok := err.(*deltasmtp.Status); ok </span><span class="cov9" title="219684">{
+                        if smtpErr, ok := err.(*deltasmtp.Status); ok </span><span class="cov9" title="218954">{
                                 // Service closing transmission channel, after quit
                                 if smtpErr.Code == 221 </span><span class="cov3" title="26">{
                                         return smtpErr
@@ -4657,7 +4657,7 @@ func (c *Conn) run() (err error) <span class="cov6" title="2186">{
 
                                 // ToDo: close connection on repeated errors (e.g. authentication tries)
 
-                                <span class="cov9" title="219658">c.writeStatus(smtpErr)
+                                <span class="cov9" title="218928">c.writeStatus(smtpErr)
                                 continue</span>
                         }
 
@@ -4668,21 +4668,21 @@ func (c *Conn) run() (err error) <span class="cov6" title="2186">{
 
 // nextCommand reads the next line and parses it.
 // The command is always returned upper case.
-func (c *Conn) nextCommand() (cmd string, arg string, err error) <span class="cov9" title="221923">{
+func (c *Conn) nextCommand() (cmd string, arg string, err error) <span class="cov9" title="221193">{
         line, err := c.readLine()
-        if err != nil </span><span class="cov6" title="2130">{
+        if err != nil </span><span class="cov6" title="2140">{
                 return "", "", err
         }</span>
-        <span class="cov9" title="219782">return parse.Cmd(line)</span>
+        <span class="cov9" title="219052">return parse.Cmd(line)</span>
 }
 
 // Commands are dispatched to the appropriate handler functions.
-func (c *Conn) handle(cmd string, arg string) error <span class="cov9" title="219770">{
+func (c *Conn) handle(cmd string, arg string) error <span class="cov9" title="219040">{
         if cmd == "" </span><span class="cov0" title="0">{
                 return deltasmtp.ErrBadSyntax
         }</span>
-        <span class="cov9" title="219770">switch c.state </span>{
-        case stateInit, stateUpgrade:<span class="cov8" title="65211">
+        <span class="cov9" title="219040">switch c.state </span>{
+        case stateInit, stateUpgrade:<span class="cov8" title="64481">
                 return c.handleStateInit(cmd, arg)</span>
         case stateEnforceSecureConnection:<span class="cov1" title="3">
                 return c.handleStateEnforceSecureConnection(cmd, arg)</span>
@@ -4697,11 +4697,11 @@ func (c *Conn) handle(cmd string, arg string) error <span class="cov9" title="21
         }
 }
 
-func (c *Conn) handleStateInit(cmd string, arg string) error <span class="cov8" title="65211">{
+func (c *Conn) handleStateInit(cmd string, arg string) error <span class="cov8" title="64481">{
         switch cmd </span>{
         case "HELO", "EHLO":<span class="cov4" title="175">
                 return c.handleGreet(cmd == "EHLO", arg)</span>
-        case "NOOP":<span class="cov8" title="65031">
+        case "NOOP":<span class="cov8" title="64301">
                 return deltasmtp.Noop</span>
         case "VRFY":<span class="cov0" title="0">
                 return c.handleVrfy(arg)</span>
@@ -4827,7 +4827,7 @@ func (c *Conn) Server() *Server <span class="cov0" title="0">{
 }</span>
 
 // Close closes the connection.
-func (c *Conn) Close(err error) <span class="cov6" title="2180">{
+func (c *Conn) Close(err error) <span class="cov6" title="2191">{
         c.logger().DebugContext(c.ctx, "connection is closing")
 
         // flush any pending data from writer before closing connection
@@ -4842,11 +4842,11 @@ func (c *Conn) Close(err error) <span class="cov6" title="2180">{
                 }</span>
         }
 
-        <span class="cov6" title="2180">if err != nil </span><span class="cov6" title="2149">{
+        <span class="cov6" title="2191">if err != nil </span><span class="cov6" title="2159">{
                 c.logger().ErrorContext(c.ctx, "close error", slog.Any("err", err))
         }</span>
 
-        <span class="cov6" title="2180">if c.session != nil </span><span class="cov6" title="2175">{
+        <span class="cov6" title="2191">if c.session != nil </span><span class="cov6" title="2185">{
                 c.session.Close(c.ctx, err)
                 c.session = nil
         }</span>
@@ -5032,8 +5032,8 @@ func (c *Conn) limits() string <span class="cov4" title="175">{
 }
 
 // handleError handles error and closes the connection afterwards.
-func (c *Conn) handleError(err error) <span class="cov6" title="2174">{
-        if err == io.EOF || errors.Is(err, net.ErrClosed) </span><span class="cov6" title="2125">{
+func (c *Conn) handleError(err error) <span class="cov6" title="2184">{
+        if err == io.EOF || errors.Is(err, net.ErrClosed) </span><span class="cov6" title="2135">{
                 c.Close(fmt.Errorf("connection closed unexpectedly: %w", err))
                 return
         }</span>
@@ -5078,13 +5078,13 @@ func (c *Conn) handleError(err error) <span class="cov6" title="2174">{
         c.Close(fmt.Errorf("unknown error: %w", err))</span>
 }
 
-func (c *Conn) logger() *slog.Logger <span class="cov10" title="448470">{
+func (c *Conn) logger() *slog.Logger <span class="cov10" title="447032">{
         // Fallback if the connection couldn't be created or is already closed.
-        if c.session == nil </span><span class="cov2" title="10">{
+        if c.session == nil </span><span class="cov2" title="12">{
                 return slog.Default()
         }</span>
-        <span class="cov9" title="448460">logger := c.session.Logger(c.ctx)
-        if logger == nil </span><span class="cov9" title="448460">{
+        <span class="cov9" title="447020">logger := c.session.Logger(c.ctx)
+        if logger == nil </span><span class="cov9" title="447020">{
                 return slog.Default()
         }</span>
         <span class="cov0" title="0">return logger</span>
@@ -5741,7 +5741,7 @@ func (c *Conn) greet() <span class="cov6" title="2186">{
         )
 }</span>
 
-func (c *Conn) writeStatus(status *deltasmtp.Status) <span class="cov9" title="222096">{
+func (c *Conn) writeStatus(status *deltasmtp.Status) <span class="cov9" title="221367">{
         c.logger().DebugContext(
                 c.ctx, "write status", slog.Any("status", status),
         )
@@ -5753,13 +5753,13 @@ func (c *Conn) writeStatus(status *deltasmtp.Status) <span class="cov9" title="2
         // PIPELINE support
         // If there is something buffered in c.text.R then we can assume another command is following.
         // This means the client is doing pipelining and we don't need to respond just now.
-        if err == nil &amp;&amp; c.receiver.Buffered() == 0 </span><span class="cov6" title="4150">{
+        if err == nil &amp;&amp; c.receiver.Buffered() == 0 </span><span class="cov6" title="4155">{
                 err = c.sender.Flush()
         }</span>
 
         // A failed write (e.g. write timeout) loses the reply, the session can't go on.
         // Closing the connection makes the next read fail and ends the session.
-        <span class="cov9" title="222096">if err != nil </span><span class="cov6" title="3337">{
+        <span class="cov9" title="221367">if err != nil </span><span class="cov6" title="2763">{
                 _ = c.conn.Close()
         }</span>
 }
@@ -5775,7 +5775,7 @@ func (c *Conn) newStatusError(status *deltasmtp.Status, err error) *deltasmtp.St
 
 // renewReadDeadline sets the read deadline to now plus the read timeout,
 // a zero read timeout means no deadline.
-func (c *Conn) renewReadDeadline() <span class="cov9" title="222013">{
+func (c *Conn) renewReadDeadline() <span class="cov9" title="221283">{
         deadline.SetRead(c.conn, c.server.readTimeout)
 }</span>
 
@@ -5787,12 +5787,12 @@ func (c *Conn) setDataDeadline() <span class="cov4" title="83">{
 
 // readLine reads a line of input.
 // It doesn't touch the read deadline, the caller has to set it.
-func (c *Conn) readLine() (string, error) <span class="cov9" title="221990">{
+func (c *Conn) readLine() (string, error) <span class="cov9" title="221260">{
         line, err := c.receiver.ReadFullLine()
-        if err == nil </span><span class="cov9" title="219849">{
+        if err == nil </span><span class="cov9" title="219119">{
                 c.logger().DebugContext(c.ctx, "read", slog.String("line", line))
         }</span>
-        <span class="cov9" title="221979">return line, err</span>
+        <span class="cov9" title="221259">return line, err</span>
 }
 
 func (c *Conn) reset() error <span class="cov4" title="121">{
@@ -6044,7 +6044,7 @@ func (s *Server) Serve(ctx context.Context, l net.Listener) error <span class="c
 
         var tempDelay time.Duration // how long to sleep on accept failure
 
-        for </span><span class="cov10" title="2314">{
+        for </span><span class="cov10" title="2315">{
                 c, err := l.Accept()
                 if err != nil </span><span class="cov6" title="108">{
                         select </span>{
@@ -6074,12 +6074,12 @@ func (s *Server) Serve(ctx context.Context, l net.Listener) error <span class="c
                         <span class="cov1" title="1">return err</span>
                 }
 
-                <span class="cov9" title="2191">s.wg.Add(1)
+                <span class="cov9" title="2192">s.wg.Add(1)
                 go s.handleConn(ctx, c)</span>
         }
 }
 
-func (s *Server) handleConn(ctx context.Context, conn net.Conn) <span class="cov9" title="2191">{
+func (s *Server) handleConn(ctx context.Context, conn net.Conn) <span class="cov9" title="2192">{
         ctx, cancel := context.WithCancel(ctx)
 
         c := &amp;Conn{
@@ -6091,23 +6091,23 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) <span class="cov
         }
 
         var ip string
-        if s.maxConnectionsPerIP &gt; 0 </span><span class="cov6" title="164">{
+        if s.maxConnectionsPerIP &gt; 0 </span><span class="cov6" title="165">{
                 ip = remoteIP(conn)
         }</span>
-        <span class="cov9" title="2191">limited := ip != ""
+        <span class="cov9" title="2192">limited := ip != ""
 
         s.locker.Lock()
         s.conns[c] = struct{}{}
-        if limited </span><span class="cov6" title="164">{
+        if limited </span><span class="cov6" title="165">{
                 s.connsByIP[ip]++
         }</span>
-        <span class="cov9" title="2191">exceeded := s.maxConnections &gt; 0 &amp;&amp; len(s.conns) &gt; s.maxConnections
+        <span class="cov9" title="2192">exceeded := s.maxConnections &gt; 0 &amp;&amp; len(s.conns) &gt; s.maxConnections
         exceededPerIP := limited &amp;&amp; s.connsByIP[ip] &gt; s.maxConnectionsPerIP
         s.locker.Unlock()
 
         var err error
 
-        defer func() </span><span class="cov9" title="2180">{
+        defer func() </span><span class="cov9" title="2191">{
                 if err := recover(); err != nil </span><span class="cov1" title="1">{
                         c.writeStatus(deltasmtp.ErrInternal)
                         stack := debug.Stack()
@@ -6120,21 +6120,21 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) <span class="cov
                         c.Close(errors.New("recovered from panic inside handleConn"))
                 }</span>
 
-                <span class="cov9" title="2180">s.locker.Lock()
+                <span class="cov9" title="2191">s.locker.Lock()
                 delete(s.conns, c)
-                if limited </span><span class="cov6" title="153">{
-                        if s.connsByIP[ip]--; s.connsByIP[ip] &lt;= 0 </span><span class="cov6" title="122">{
+                if limited </span><span class="cov6" title="164">{
+                        if s.connsByIP[ip]--; s.connsByIP[ip] &lt;= 0 </span><span class="cov6" title="137">{
                                 delete(s.connsByIP, ip)
                         }</span>
                 }
-                <span class="cov9" title="2180">s.locker.Unlock()
+                <span class="cov9" title="2191">s.locker.Unlock()
 
                 s.wg.Done()
 
                 cancel()</span>
         }()
 
-        <span class="cov9" title="2191">if exceeded || exceededPerIP </span><span class="cov2" title="5">{
+        <span class="cov9" title="2192">if exceeded || exceededPerIP </span><span class="cov3" title="6">{
                 // Overall limit first, the client isn't at fault for a busy server.
                 status := deltasmtp.ErrTooManyConnections
                 if !exceeded </span><span class="cov1" title="2">{
@@ -6142,7 +6142,7 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) <span class="cov
                         status = deltasmtp.NewStatusS(421, deltasmtp.EnhancedCode{4, 7, 0},
                                 fmt.Sprintf("%s Error: too many connections from %s", s.hostname, ip))
                 }</span>
-                <span class="cov2" title="5">c.writeStatus(status)
+                <span class="cov3" title="6">c.writeStatus(status)
                 c.Close(nil)
                 return</span>
         }
@@ -6174,8 +6174,8 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) <span class="cov
 }
 
 // remoteIP returns the remote IP of a TCP connection, or "" for other networks.
-func remoteIP(conn net.Conn) string <span class="cov6" title="164">{
-        if addr, ok := conn.RemoteAddr().(*net.TCPAddr); ok </span><span class="cov6" title="164">{
+func remoteIP(conn net.Conn) string <span class="cov6" title="165">{
+        if addr, ok := conn.RemoteAddr().(*net.TCPAddr); ok </span><span class="cov6" title="165">{
                 return addr.IP.String()
         }</span>
         <span class="cov0" title="0">return ""</span>
@@ -6263,7 +6263,7 @@ func (s *Server) Close() error <span class="cov6" title="106">{
                 }</span>
         }
 
-        <span class="cov6" title="106">for conn := range s.conns </span><span class="cov7" title="253">{
+        <span class="cov6" title="106">for conn := range s.conns </span><span class="cov7" title="224">{
                 // directly close underlying connection
                 _ = conn.conn.Close()
         }</span>
@@ -6829,12 +6829,12 @@ var NoEnhancedCode = EnhancedCode{0, 0, 0}
 // ToPart returns the part of the string after the code
 // which is defined by the enhanced code with the trailing whitespace.
 // E.g. "5.1.1 " or "5.7.26 " (RFC 3463: subject and detail have up to 3 digits).
-func (enhCode EnhancedCode) ToPart() []byte <span class="cov10" title="376644">{
+func (enhCode EnhancedCode) ToPart() []byte <span class="cov10" title="375915">{
         if enhCode == NoEnhancedCode </span><span class="cov6" title="2816">{
                 return nil
         }</span>
         // 10 is the longest valid code with the trailing space, e.g. "5.123.123 ".
-        <span class="cov9" title="373828">b := make([]byte, 0, 10)
+        <span class="cov9" title="373099">b := make([]byte, 0, 10)
         b = strconv.AppendInt(b, int64(enhCode[0]), 10)
         b = append(b, '.')
         b = strconv.AppendInt(b, int64(enhCode[1]), 10)
@@ -6907,15 +6907,15 @@ type StatusWriter interface {
 }
 
 // writeLine writes a single reply line. last selects the terminating form.
-func writeLine(w StatusWriter, code string, enhCode []byte, message string, last bool) (i int, err error) <span class="cov9" title="223244">{
+func writeLine(w StatusWriter, code string, enhCode []byte, message string, last bool) (i int, err error) <span class="cov9" title="222515">{
         var p int
 
         i, err = w.WriteString(code)
-        if err != nil </span><span class="cov6" title="3336">{
+        if err != nil </span><span class="cov6" title="2762">{
                 return i, err
         }</span>
 
-        <span class="cov9" title="219908">if last </span><span class="cov9" title="218761">{
+        <span class="cov9" title="219753">if last </span><span class="cov9" title="218606">{
                 // RFC 5321 permits omitting the space when there is no text, but
                 // RFC 4954 requires it for the 334 challenge and net/textproto
                 // rejects any reply shorter than four bytes. Always emit it.
@@ -6923,10 +6923,10 @@ func writeLine(w StatusWriter, code string, enhCode []byte, message string, last
         }</span> else<span class="cov5" title="1147"> {
                 err = w.WriteByte('-')
         }</span>
-        <span class="cov9" title="219908">if err != nil </span><span class="cov0" title="0">{
+        <span class="cov9" title="219753">if err != nil </span><span class="cov0" title="0">{
                 return i, err
         }</span>
-        <span class="cov9" title="219908">i++ // single byte added
+        <span class="cov9" title="219753">i++ // single byte added
 
         p, err = w.Write(enhCode)
         i += p
@@ -6934,20 +6934,20 @@ func writeLine(w StatusWriter, code string, enhCode []byte, message string, last
                 return i, err
         }</span>
 
-        <span class="cov9" title="219908">p, err = w.WriteString(message)
+        <span class="cov9" title="219753">p, err = w.WriteString(message)
         i += p
         if err != nil </span><span class="cov1" title="1">{
                 return i, err
         }</span>
 
-        <span class="cov9" title="219907">p, err = w.Write(Crnl)
+        <span class="cov9" title="219752">p, err = w.Write(Crnl)
         i += p
 
         return i, err</span>
 }
 
 // WriteTo writes the smtp status reply.
-func (s *Status) WriteTo(w StatusWriter) (int64, error) <span class="cov9" title="222097">{
+func (s *Status) WriteTo(w StatusWriter) (int64, error) <span class="cov9" title="221368">{
         codeString := strconv.Itoa(s.Code)
         enhCodeString := s.EnhancedCode.ToPart()
 
@@ -6957,16 +6957,16 @@ func (s *Status) WriteTo(w StatusWriter) (int64, error) <span class="cov9" title
                 return int64(p), err
         }</span>
 
-        <span class="cov9" title="222097">var i int
-        for q, m := range s.Lines </span><span class="cov9" title="223244">{
+        <span class="cov9" title="221368">var i int
+        for q, m := range s.Lines </span><span class="cov9" title="222515">{
                 p, err := writeLine(w, codeString, enhCodeString, m, q+1 == len(s.Lines))
                 i += p
-                if err != nil </span><span class="cov6" title="3337">{
+                if err != nil </span><span class="cov6" title="2763">{
                         return int64(i), err
                 }</span>
         }
 
-        <span class="cov9" title="218760">return int64(i), nil</span>
+        <span class="cov9" title="218605">return int64(i), nil</span>
 }
 
 // LogValue implements slog.LogValuer so that formatting a Status is deferred
