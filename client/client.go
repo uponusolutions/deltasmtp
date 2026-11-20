@@ -596,8 +596,10 @@ func (c *Client) Verify(addr string, opts *VrfyOptions) error {
 
 	var sb strings.Builder
 
-	sb.Grow(2048)
-	fmt.Fprintf(&sb, "VRFY %s", addr)
+	// The builder grows if it's too small, fmt would move it to the heap.
+	sb.Grow(len(addr) + 16)
+	sb.WriteString("VRFY ")
+	sb.WriteString(addr)
 
 	// By default utf8 is preferred
 	if opts == nil || opts.UTF8 != UTF8Disabled {
@@ -719,14 +721,19 @@ func (c *Client) Mail(from string, opts *MailOptions) error {
 	}
 
 	var sb strings.Builder
-	// A high enough power of 2 than 510+14+26+11+9+9+39+500
-	sb.Grow(2048)
-	fmt.Fprintf(&sb, "MAIL FROM:<%s>", from)
+	// Enough for the address with BODY, SIZE and SMTPUTF8, the builder grows for
+	// more. fmt would move it to the heap.
+	sb.Grow(len(from) + 64)
+	sb.WriteString("MAIL FROM:<")
+	sb.WriteString(from)
+	sb.WriteString(">")
 	if _, ok := c.connExt["8BITMIME"]; ok {
 		sb.WriteString(" BODY=8BITMIME")
 	}
 	if _, ok := c.connExt["SIZE"]; ok && opts != nil && opts.Size != 0 {
-		fmt.Fprintf(&sb, " SIZE=%v", opts.Size)
+		var num [20]byte
+		sb.WriteString(" SIZE=")
+		sb.Write(strconv.AppendInt(num[:0], opts.Size, 10))
 	}
 	if opts != nil && opts.RequireTLS {
 		if _, ok := c.connExt["REQUIRETLS"]; !ok {
@@ -745,7 +752,8 @@ func (c *Client) Mail(from string, opts *MailOptions) error {
 	if _, ok := c.connExt["DSN"]; ok && opts != nil {
 		switch opts.Return {
 		case deltasmtp.DSNReturnFull, deltasmtp.DSNReturnHeaders:
-			fmt.Fprintf(&sb, " RET=%s", string(opts.Return))
+			sb.WriteString(" RET=")
+			sb.WriteString(string(opts.Return))
 		case "":
 			// This space is intentionally left blank
 		default:
@@ -755,19 +763,22 @@ func (c *Client) Mail(from string, opts *MailOptions) error {
 			if !parse.IsPrintableASCII(opts.EnvelopeID) {
 				return errors.New("smtp: Malformed ENVID parameter value")
 			}
-			fmt.Fprintf(&sb, " ENVID=%s", encodeXtext(opts.EnvelopeID))
+			sb.WriteString(" ENVID=")
+			sb.WriteString(encodeXtext(opts.EnvelopeID))
 		}
 	}
 	if opts != nil && opts.Auth != nil {
 		if _, ok := c.connExt["AUTH"]; ok {
-			fmt.Fprintf(&sb, " AUTH=%s", encodeXtext(*opts.Auth))
+			sb.WriteString(" AUTH=")
+			sb.WriteString(encodeXtext(*opts.Auth))
 		}
 		// We can safely discard parameter if server does not support AUTH.
 	}
 
 	if opts != nil && opts.XOORG != nil {
 		if _, ok := c.connExt["XOORG"]; ok {
-			fmt.Fprintf(&sb, " XOORG=%s", encodeXtext(*opts.XOORG))
+			sb.WriteString(" XOORG=")
+			sb.WriteString(encodeXtext(*opts.XOORG))
 		}
 		// We can safely discard parameter if server does not support AUTH.
 	}
@@ -790,7 +801,8 @@ func (c *Client) Mail(from string, opts *MailOptions) error {
 		if *opts.MTPriority < -9 || *opts.MTPriority > 9 {
 			return errors.New("smtp: MT-PRIORITY must be between -9 and 9")
 		}
-		fmt.Fprintf(&sb, " MT-PRIORITY=%d", *opts.MTPriority)
+		sb.WriteString(" MT-PRIORITY=")
+		sb.WriteString(strconv.Itoa(*opts.MTPriority))
 	}
 	return c.cmdValid(pipeliningTypeAnywhere, 250, sb.String())
 }
@@ -813,16 +825,20 @@ func (c *Client) Rcpt(to string, opts *deltasmtp.RcptOptions) error {
 		return err
 	}
 	var sb strings.Builder
-	// A high enough power of 2 than 510+29+501
-	sb.Grow(2048)
-	fmt.Fprintf(&sb, "RCPT TO:<%s>", to)
+	// Enough for the address, the builder grows for DSN and RRVS. fmt would move
+	// it to the heap.
+	sb.Grow(len(to) + 16)
+	sb.WriteString("RCPT TO:<")
+	sb.WriteString(to)
+	sb.WriteString(">")
 	if _, ok := c.connExt["DSN"]; ok && opts != nil {
 		if err := rcptDSN(&sb, opts, c.connExt); err != nil {
 			return err
 		}
 	}
 	if _, ok := c.connExt["RRVS"]; ok && opts != nil && !opts.RequireRecipientValidSince.IsZero() {
-		fmt.Fprintf(&sb, " RRVS=%s", opts.RequireRecipientValidSince.Format(time.RFC3339))
+		sb.WriteString(" RRVS=")
+		sb.WriteString(opts.RequireRecipientValidSince.Format(time.RFC3339))
 	}
 	return c.cmdValid(pipeliningTypeAnywhere, 25, sb.String())
 }
@@ -862,7 +878,10 @@ func rcptDSN(sb *strings.Builder, opts *deltasmtp.RcptOptions, ext map[string]st
 		default:
 			return errors.New("smtp: Unknown address type")
 		}
-		fmt.Fprintf(sb, " ORCPT=%s;%s", string(opts.OriginalRecipientType), enc)
+		sb.WriteString(" ORCPT=")
+		sb.WriteString(string(opts.OriginalRecipientType))
+		sb.WriteString(";")
+		sb.WriteString(enc)
 	}
 	return nil
 }

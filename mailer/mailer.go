@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"slices"
+	"sync"
 
 	"github.com/uponusolutions/deltasmtp"
 	"github.com/uponusolutions/deltasmtp/client"
@@ -402,7 +403,10 @@ func (c *Mailer) SendAdvanced(
 		return nil, failures, nil
 	}
 
-	if _, err = io.Copy(w.Writer(), in); err != nil {
+	buf := getCopyBuffer()
+	_, err = io.CopyBuffer(w.Writer(), in, *buf)
+	copyBuffers.Put(buf)
+	if err != nil {
 		// The message is only partly sent, the connection can't be reused. This includes a
 		// rejected BDAT chunk, which would leave it in sync, but can't be told apart from an
 		// *deltasmtp.Status returned by in (e.g. the data reader of a server).
@@ -561,4 +565,16 @@ func send(ctx context.Context, server resolve.Server, from string, config Config
 	defer func() { _ = client.Disconnect() }()
 
 	return client.Send(ctx, from, server.Rcpts, in)
+}
+
+// copyBuffers holds the buffers copying the message content, shared by all
+// mailers. io.Copy would allocate (and zero) 32 KB for every message.
+var copyBuffers sync.Pool
+
+func getCopyBuffer() *[]byte {
+	if b, ok := copyBuffers.Get().(*[]byte); ok {
+		return b
+	}
+	b := make([]byte, 32*1024)
+	return &b
 }

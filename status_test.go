@@ -3,6 +3,8 @@ package deltasmtp
 import (
 	"bufio"
 	"bytes"
+	"io"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -29,4 +31,40 @@ func TestStatusWriteToMultiDigitEnhancedCode(t *testing.T) {
 
 	assert.Equal(t, "550-5.7.26 first\r\n550 5.7.26 last\r\n", out.String())
 	assert.Equal(t, int64(out.Len()), n)
+}
+
+// A reply written to a bufio.Writer is appended to its free buffer.
+func TestStatusWriteToNoAllocs(t *testing.T) {
+	w := bufio.NewWriter(io.Discard)
+	s := NewStatusS(250, EnhancedCode{2, 1, 5}, "I'll make sure <bob@example.com> gets this")
+
+	allocs := testing.AllocsPerRun(100, func() {
+		_, _ = s.WriteTo(w)
+	})
+	assert.Zero(t, allocs)
+}
+
+// A writer without a free buffer gets the same reply.
+func TestStatusWriteToWithoutBuffer(t *testing.T) {
+	var sb strings.Builder
+	n, err := NewStatusM(250, EnhancedCode{2, 0, 0}, nil).WriteTo(&sb)
+	require.NoError(t, err)
+	assert.Equal(t, "250 2.0.0 \r\n", sb.String())
+	assert.Equal(t, int64(sb.Len()), n)
+
+	sb.Reset()
+	n, err = NewStatusM(354, NoEnhancedCode, []string{"a", "b"}).WriteTo(&sb)
+	require.NoError(t, err)
+	assert.Equal(t, "354-a\r\n354 b\r\n", sb.String())
+	assert.Equal(t, int64(sb.Len()), n)
+}
+
+// NewStatusS allocates the status and its line together, Lines is still an
+// ordinary slice.
+func TestNewStatusS(t *testing.T) {
+	s := NewStatusS(250, EnhancedCode{2, 0, 0}, "OK")
+	assert.Equal(t, &Status{Code: 250, EnhancedCode: EnhancedCode{2, 0, 0}, Lines: []string{"OK"}}, s)
+
+	s.Lines = append(s.Lines, "more")
+	assert.Equal(t, []string{"OK", "more"}, s.Lines)
 }

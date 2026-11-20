@@ -114,6 +114,11 @@ type Server struct {
 	listeners []net.Listener
 	conns     map[*Conn]struct{}
 	connsByIP map[string]int
+
+	// Buffers of closed connections, reused by new ones. All connections of a
+	// server have the same buffer sizes.
+	senders   sync.Pool // *smtpwriter.Sender
+	receivers sync.Pool // *smtpreader.Receiver
 }
 
 // Backend returns the servers Backend.

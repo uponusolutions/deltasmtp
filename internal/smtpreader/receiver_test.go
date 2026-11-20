@@ -390,3 +390,46 @@ func TestReceiverResetClearsLineLengthExceeded(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "250 OK", line)
 }
+
+func TestParseCode(t *testing.T) {
+	for line, want := range map[string]int{"250 OK": 250, "999-": 999, "100 ": 100} {
+		code, ok := parseCode(line)
+		require.True(t, ok, line)
+		require.Equal(t, want, code, line)
+	}
+	for _, line := range []string{"250", "099 x", "+12 x", "-12 x", "2a0 x", " 25 x", ""} {
+		_, ok := parseCode(line)
+		require.False(t, ok, line)
+	}
+}
+
+// An expected single line reply is checked without allocating.
+func TestReadResponseValidNoAllocs(t *testing.T) {
+	const runs = 100
+	r := NewReceiver(strings.NewReader(strings.Repeat("250 2.1.5 OK\r\n", runs+1)), 4096, 0, 0)
+
+	allocs := testing.AllocsPerRun(runs, func() {
+		if err := r.ReadResponseValid(250); err != nil {
+			t.Fatal(err)
+		}
+	})
+	require.Zero(t, allocs)
+}
+
+// An invalid or unexpected reply still fails as before.
+func TestReadResponseValidInvalid(t *testing.T) {
+	err := reader("099 2.0.0 OK\r\n", &bytes.Buffer{}).ReadResponseValid(250)
+	require.ErrorContains(t, err, "invalid response code")
+
+	err = reader("25\r\n", &bytes.Buffer{}).ReadResponseValid(250)
+	require.ErrorContains(t, err, "short response")
+
+	err = reader("251 2.1.5 OK\r\n", &bytes.Buffer{}).ReadResponseValid(250)
+	var status *deltasmtp.Status
+	require.ErrorAs(t, err, &status)
+	require.Equal(t, 251, status.Code)
+	require.Equal(t, deltasmtp.EnhancedCode{2, 1, 5}, status.EnhancedCode)
+	require.Equal(t, []string{"OK"}, status.Lines)
+
+	require.NoError(t, reader("251 OK\r\n", &bytes.Buffer{}).ReadResponseValid(25))
+}

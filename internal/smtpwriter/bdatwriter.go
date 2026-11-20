@@ -137,7 +137,7 @@ func (d *bdat) bdat(size int, last bool) (err error) {
 		return err
 	}
 
-	if _, err = d.w.Write([]byte(strconv.Itoa(size))); err != nil {
+	if _, err = d.w.Write(strconv.AppendInt(d.w.AvailableBuffer(), int64(size), 10)); err != nil {
 		return err
 	}
 

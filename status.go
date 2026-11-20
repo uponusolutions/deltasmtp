@@ -47,7 +47,14 @@ func (enhCode EnhancedCode) ToPart() []byte {
 		return nil
 	}
 	// 10 is the longest valid code with the trailing space, e.g. "5.123.123 ".
-	b := make([]byte, 0, 10)
+	return enhCode.appendPart(make([]byte, 0, 10))
+}
+
+// appendPart appends ToPart to b, nothing for NoEnhancedCode.
+func (enhCode EnhancedCode) appendPart(b []byte) []byte {
+	if enhCode == NoEnhancedCode {
+		return b
+	}
 	b = strconv.AppendInt(b, int64(enhCode[0]), 10)
 	b = append(b, '.')
 	b = strconv.AppendInt(b, int64(enhCode[1]), 10)
@@ -67,11 +74,13 @@ func NewStatusM(code int, enhCode EnhancedCode, msg []string) *Status {
 
 // NewStatusS creates a new status with a single message line.
 func NewStatusS(code int, enhCode EnhancedCode, msg string) *Status {
-	return &Status{
-		Code:         code,
-		EnhancedCode: enhCode,
-		Lines:        []string{msg},
-	}
+	// The status and its line in one allocation instead of two.
+	s := &struct {
+		Status
+		line [1]string
+	}{line: [1]string{msg}}
+	s.Status = Status{Code: code, EnhancedCode: enhCode, Lines: s.line[:]}
+	return &s.Status
 }
 
 // Error returns a error string.
@@ -119,68 +128,46 @@ type StatusWriter interface {
 	io.Writer
 }
 
-// writeLine writes a single reply line. last selects the terminating form.
-func writeLine(w StatusWriter, code string, enhCode []byte, message string, last bool) (i int, err error) {
-	var p int
-
-	i, err = w.WriteString(code)
-	if err != nil {
-		return i, err
+// WriteTo writes the smtp status reply. Every line is appended to the free
+// buffer of w if it has one (e.g. bufio.Writer) and written at once, so
+// writing a reply doesn't allocate.
+func (s *Status) WriteTo(w StatusWriter) (int64, error) {
+	lines := s.Lines
+	if len(lines) == 0 {
+		lines = noLines
 	}
 
-	if last {
+	var n int64
+	for i, m := range lines {
+		var b []byte
+		if ab, ok := w.(interface{ AvailableBuffer() []byte }); ok {
+			b = ab.AvailableBuffer()
+		}
+		b = strconv.AppendInt(b, int64(s.Code), 10)
 		// RFC 5321 permits omitting the space when there is no text, but
 		// RFC 4954 requires it for the 334 challenge and net/textproto
 		// rejects any reply shorter than four bytes. Always emit it.
-		err = w.WriteByte(' ')
-	} else {
-		err = w.WriteByte('-')
-	}
-	if err != nil {
-		return i, err
-	}
-	i++ // single byte added
+		if i == len(lines)-1 {
+			b = append(b, ' ')
+		} else {
+			b = append(b, '-')
+		}
+		b = s.EnhancedCode.appendPart(b)
+		b = append(b, m...)
+		b = append(b, '\r', '\n')
 
-	p, err = w.Write(enhCode)
-	i += p
-	if err != nil {
-		return i, err
-	}
-
-	p, err = w.WriteString(message)
-	i += p
-	if err != nil {
-		return i, err
-	}
-
-	p, err = w.Write(Crnl)
-	i += p
-
-	return i, err
-}
-
-// WriteTo writes the smtp status reply.
-func (s *Status) WriteTo(w StatusWriter) (int64, error) {
-	codeString := strconv.Itoa(s.Code)
-	enhCodeString := s.EnhancedCode.ToPart()
-
-	// no message set
-	if len(s.Lines) == 0 {
-		p, err := writeLine(w, codeString, enhCodeString, "", true)
-		return int64(p), err
-	}
-
-	var i int
-	for q, m := range s.Lines {
-		p, err := writeLine(w, codeString, enhCodeString, m, q+1 == len(s.Lines))
-		i += p
+		p, err := w.Write(b)
+		n += int64(p)
 		if err != nil {
-			return int64(i), err
+			return n, err
 		}
 	}
 
-	return int64(i), nil
+	return n, nil
 }
+
+// noLines is written for a status without a line, a reply has at least one.
+var noLines = []string{""}
 
 // LogValue implements slog.LogValuer so that formatting a Status is deferred
 // to the handler and skipped entirely when the record is dropped.

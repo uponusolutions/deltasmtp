@@ -80,8 +80,8 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 		ctx:      ctx,
 		server:   s,
 		conn:     conn,
-		sender:   smtpwriter.NewSender(conn, s.writerSize),
-		receiver: smtpreader.NewReceiver(conn, s.readerSize, s.maxLineLength, 0),
+		sender:   s.newSender(conn),
+		receiver: s.newReceiver(conn),
 	}
 	c.renewDeadline() // for the greeting
 
@@ -124,6 +124,8 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 		}
 		s.locker.Unlock()
 
+		s.releaseBuffers(c)
+
 		s.wg.Done()
 
 		cancel()
@@ -164,6 +166,40 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 
 	// run always returns an error when finished
 	c.handleError(c.run())
+}
+
+// newSender returns the writer of a new connection, with the buffer of a
+// closed one if possible.
+func (s *Server) newSender(conn net.Conn) *smtpwriter.Sender {
+	if sender, ok := s.senders.Get().(*smtpwriter.Sender); ok {
+		sender.Reset(conn)
+		return sender
+	}
+	return smtpwriter.NewSender(conn, s.writerSize)
+}
+
+// newReceiver returns the reader of a new connection, with the buffer of a
+// closed one if possible.
+func (s *Server) newReceiver(conn net.Conn) *smtpreader.Receiver {
+	if receiver, ok := s.receivers.Get().(*smtpreader.Receiver); ok {
+		receiver.Reset(conn)
+		return receiver
+	}
+	return smtpreader.NewReceiver(conn, s.readerSize, s.maxLineLength, 0)
+}
+
+// releaseBuffers returns the buffers of the closed connection c for reuse.
+// The connection can't read or write anymore, Close does nothing more than
+// closing it again.
+func (s *Server) releaseBuffers(c *Conn) {
+	sender, receiver := c.sender, c.receiver
+	c.sender, c.receiver = nil, nil
+
+	// Drop the connection, a pooled buffer must not keep it alive.
+	sender.Reset(nil)
+	receiver.Reset(nil)
+	s.senders.Put(sender)
+	s.receivers.Put(receiver)
 }
 
 // remoteIP returns the remote IP of a TCP connection, or "" for other networks.

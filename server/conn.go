@@ -280,8 +280,11 @@ func (c *Conn) Server() *Server {
 func (c *Conn) Close(err error) {
 	c.logger().DebugContext(c.ctx, "connection is closing")
 
-	// flush any pending data from writer before closing connection
-	_ = c.sender.Flush()
+	// flush any pending data from writer before closing connection, the
+	// writer is gone if the connection was closed before
+	if c.sender != nil {
+		_ = c.sender.Flush()
+	}
 
 	closeErr := c.conn.Close()
 	if closeErr != nil {
@@ -693,7 +696,7 @@ func (c *Conn) handleMail(arg string) error {
 	}
 
 	c.state = stateMail
-	return deltasmtp.NewStatusS(250, deltasmtp.EnhancedCode{2, 0, 0}, fmt.Sprintf("Roger, accepting mail from <%v>", from))
+	return deltasmtp.NewStatusS(250, deltasmtp.EnhancedCode{2, 0, 0}, "Roger, accepting mail from <"+from+">")
 }
 
 func handleMailBY(server *Server, opts *deltasmtp.MailOptions, value string) error {
@@ -814,7 +817,7 @@ func (c *Conn) handleRcpt(arg string) error {
 
 	c.tx.recipients++
 	return deltasmtp.NewStatusS(250, deltasmtp.EnhancedCode{2, 0, 0},
-		fmt.Sprintf("I'll make sure <%v> gets this", recipient))
+		"I'll make sure <"+recipient+"> gets this")
 }
 
 func handleRcptNotify(server *Server, opts *deltasmtp.RcptOptions, value string) error {

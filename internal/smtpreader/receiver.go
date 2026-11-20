@@ -89,8 +89,17 @@ func (t *Receiver) ReadResponse() (*deltasmtp.Status, error) {
 }
 
 // ReadResponseValid returns an error if the code does not match expectation.
+// An expected single line reply, the common case, is checked without allocating.
 func (t *Receiver) ReadResponseValid(expectCode int) error {
-	status, continued, err := t.readFirstCodeLine()
+	line, err := t.readLineSlice()
+	if err != nil {
+		return err
+	}
+	if code, ok := parseCode(line); ok && line[3] == ' ' && !IsCodeUnexpected(code, expectCode) {
+		return nil
+	}
+
+	status, continued, err := parseFirstCodeLine(string(line))
 	if err != nil {
 		return err
 	}
@@ -110,15 +119,20 @@ func (t *Receiver) ReadResponseValid(expectCode int) error {
 }
 
 func (t *Receiver) readResponseExtra(status *deltasmtp.Status, continued bool, appendMessage bool) error {
+	if !continued {
+		return nil
+	}
+
 	var message string
 	var err error
 
+	codeString := strconv.Itoa(status.Code)
 	encCodePart := status.EnhancedCode.ToPart()
 	for lines := 1; continued; lines++ {
 		if t.maxResponseLines > 0 && lines >= t.maxResponseLines {
 			return ErrTooManyResponseLines
 		}
-		continued, message, err = t.readExtraCodeLine(strconv.Itoa(status.Code), encCodePart)
+		continued, message, err = t.readExtraCodeLine(codeString, encCodePart)
 		if err != nil {
 			return err
 		}
@@ -142,8 +156,8 @@ func parseFirstCodeLine(line string) (*deltasmtp.Status, bool, error) {
 		return nil, false, textproto.ProtocolError(fmt.Sprintf("short response: %q", line))
 	}
 	continued := line[3] == '-'
-	code, err := strconv.Atoi(line[0:3])
-	if err != nil || code < 100 {
+	code, ok := parseCode(line)
+	if !ok {
 		return nil, false, textproto.ProtocolError(fmt.Sprintf("invalid response code: %q", line))
 	}
 	message := line[4:]
@@ -195,13 +209,14 @@ func parseExtraCodeLine(line string, codeString string, enhCodePart []byte) (boo
 //
 // Anything else isn't an enhanced code, but the start of the reply text.
 func parseEnhancedCode(s string, replyCode int) (deltasmtp.EnhancedCode, error) {
-	parts := strings.Split(s, ".")
-	if len(parts) != 3 {
+	if strings.Count(s, ".") != 2 {
 		return deltasmtp.NoEnhancedCode, errors.New("wrong amount of enhanced code parts")
 	}
 
 	code := deltasmtp.NoEnhancedCode
-	for i, part := range parts {
+	for i := range code {
+		var part string
+		part, s, _ = strings.Cut(s, ".")
 		maxDigits := 3
 		if i == 0 {
 			maxDigits = 1
@@ -217,6 +232,22 @@ func parseEnhancedCode(s string, replyCode int) (deltasmtp.EnhancedCode, error) 
 		return deltasmtp.NoEnhancedCode, fmt.Errorf("enhanced code class %d doesn't match reply code %d", code[0], replyCode)
 	}
 	return code, nil
+}
+
+// parseCode returns the reply code at the start of line, three digits from 100
+// to 999. ok is false if line doesn't start with one or is shorter than four bytes.
+func parseCode[T string | []byte](line T) (code int, ok bool) {
+	if len(line) < 4 {
+		return 0, false
+	}
+	for i := range 3 {
+		c := line[i]
+		if c < '0' || c > '9' || i == 0 && c == '0' {
+			return 0, false
+		}
+		code = code*10 + int(c-'0')
+	}
+	return code, true
 }
 
 // IsCodeUnexpected validates if the code is unexpected.
