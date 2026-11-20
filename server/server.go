@@ -26,7 +26,6 @@ import (
 	"time"
 
 	"github.com/uponusolutions/deltasmtp"
-	"github.com/uponusolutions/deltasmtp/internal/deadline"
 	"github.com/uponusolutions/deltasmtp/internal/smtpreader"
 	"github.com/uponusolutions/deltasmtp/internal/smtpwriter"
 )
@@ -84,6 +83,7 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 		sender:   smtpwriter.NewSender(conn, s.writerSize),
 		receiver: smtpreader.NewReceiver(conn, s.readerSize, s.maxLineLength, 0),
 	}
+	c.renewDeadline() // for the greeting
 
 	var ip string
 	if s.maxConnectionsPerIP > 0 {
@@ -156,9 +156,7 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 
 	// explicit tls handshake call
 	if tlsConn, ok := c.conn.(*tls.Conn); ok {
-		deadline.SetRead(c.conn, s.readTimeout)
-		deadline.SetWrite(c.conn, s.writeTimeout)
-		if err := tlsConn.Handshake(); err != nil {
+		if err := c.handshake(tlsConn); err != nil {
 			c.handleError(err)
 			return
 		}

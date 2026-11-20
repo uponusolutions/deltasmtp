@@ -139,6 +139,7 @@ func WithDataTimeout(dataTimeout time.Duration) Option {
 }
 
 // WithCommandTimeout sets the timeout for every command and its reply, including the greeting.
+// The deadline is renewed lazily, so a timeout fires after 100% to 125% of it.
 // Defaults to 5 minutes, zero disables the timeout.
 func WithCommandTimeout(commandTimeout time.Duration) Option {
 	return func(c *Config) {
@@ -163,9 +164,9 @@ func WithDialControl(control func(network, address string, c syscall.RawConn) er
 	}
 }
 
-// WithTlsHandshakeTimeout sets the STARTTLS handshake timeout.
+// WithTLSHandshakeTimeout sets the TLS handshake timeout of DialTLS and StartTLS.
 // Defaults to 30 seconds, zero disables the timeout.
-func WithTlsHandshakeTimeout(tlsHandshakeTimeout time.Duration) Option {
+func WithTLSHandshakeTimeout(tlsHandshakeTimeout time.Duration) Option {
 	return func(c *Config) {
 		c.tlsHandshakeTimeout = tlsHandshakeTimeout
 	}

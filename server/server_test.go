@@ -2315,8 +2315,8 @@ func TestServer_DefaultLimits(t *testing.T) {
 	}
 }
 
-func TestServer_ReadTimeoutIdle(t *testing.T) {
-	_, s, c, scanner := testServerGreeted(t, nil, server.WithReadTimeout(100*time.Millisecond))
+func TestServer_CommandTimeoutIdle(t *testing.T) {
+	_, s, c, scanner := testServerGreeted(t, nil, server.WithCommandTimeout(100*time.Millisecond))
 	defer func() {
 		_ = s.Close()
 		_ = c.Close()
@@ -2331,6 +2331,70 @@ func TestServer_ReadTimeoutIdle(t *testing.T) {
 	if scan(t, c, scanner) {
 		t.Fatal("Expected connection to be closed, got:", scanner.Text())
 	}
+}
+
+// requireIdleTimeout waits for the idle timeout reply and checks that it took at
+// least the timeout and at most 125% of it (lazy renewal), with some slack.
+func requireIdleTimeout(t *testing.T, c net.Conn, scanner *bufio.Scanner, since time.Time, timeout time.Duration) {
+	t.Helper()
+	scanOk(t, c, scanner)
+	elapsed := time.Since(since)
+	require.True(t, strings.HasPrefix(scanner.Text(), "421 4.4.2 "), scanner.Text())
+	require.GreaterOrEqual(t, elapsed, timeout-10*time.Millisecond)
+	require.Less(t, elapsed, timeout*5/4+100*time.Millisecond)
+}
+
+// The command deadline is renewed lazily, but waiting for a command always has at
+// least the command timeout, also right after a renewal was skipped.
+func TestServer_CommandTimeoutRenewed(t *testing.T) {
+	const timeout = 400 * time.Millisecond
+	_, s, c, scanner := testServerGreeted(t, nil, server.WithCommandTimeout(timeout))
+	defer func() {
+		_ = s.Close()
+		_ = c.Close()
+	}()
+
+	// 3.5 times the timeout in total
+	for range 3 {
+		time.Sleep(timeout / 5) // the renewal for this command is skipped
+		_, _ = io.WriteString(c, "NOOP\r\n")
+		scanOk(t, c, scanner)
+		require.True(t, strings.HasPrefix(scanner.Text(), "250 "), scanner.Text())
+
+		time.Sleep(timeout * 19 / 20) // slow, but in time
+		_, _ = io.WriteString(c, "NOOP\r\n")
+		scanOk(t, c, scanner)
+		require.True(t, strings.HasPrefix(scanner.Text(), "250 "), scanner.Text())
+	}
+
+	requireIdleTimeout(t, c, scanner, time.Now(), timeout)
+}
+
+// After a transfer the command timeout starts fresh with the reply. The transfer is
+// quick, so without a renewal the data deadline would stay active.
+func TestServer_CommandTimeoutAfterData(t *testing.T) {
+	const timeout = 400 * time.Millisecond
+	_, s, c, scanner := testServerAuthenticated(t, nil,
+		server.WithCommandTimeout(timeout), server.WithDataTimeout(10*time.Second))
+	defer func() {
+		_ = s.Close()
+		_ = c.Close()
+	}()
+
+	_, _ = io.WriteString(c, "MAIL FROM:<root@nsa.gov>\r\n")
+	scanOk(t, c, scanner)
+	_, _ = io.WriteString(c, "RCPT TO:<root@gchq.gov.uk>\r\n")
+	scanOk(t, c, scanner)
+	_, _ = io.WriteString(c, "DATA\r\n")
+	scanOk(t, c, scanner)
+	require.True(t, strings.HasPrefix(scanner.Text(), "354 "), scanner.Text())
+
+	_, _ = io.WriteString(c, "From: root@nsa.gov\r\n\r\nHey\r\n.\r\n")
+	scanOk(t, c, scanner)
+	require.True(t, strings.HasPrefix(scanner.Text(), "250 "), scanner.Text())
+
+	// not the data deadline of 10 seconds
+	requireIdleTimeout(t, c, scanner, time.Now(), timeout)
 }
 
 // A client going silent in the middle of DATA is disconnected after the data timeout.
@@ -2356,8 +2420,8 @@ func TestServer_DataTimeoutStalled(t *testing.T) {
 }
 
 // DATA uses the data timeout, a transfer taking longer than the read timeout must succeed.
-func TestServer_ReadTimeoutSlowData(t *testing.T) {
-	be, s, c, scanner := testServerAuthenticated(t, nil, server.WithReadTimeout(150*time.Millisecond))
+func TestServer_CommandTimeoutSlowData(t *testing.T) {
+	be, s, c, scanner := testServerAuthenticated(t, nil, server.WithCommandTimeout(150*time.Millisecond))
 	defer func() {
 		_ = s.Close()
 		_ = c.Close()
@@ -2420,7 +2484,7 @@ func TestServer_DataTimeoutWholeTransfer(t *testing.T) {
 // After a transfer the data deadline must not stay active, even if the read timeout is disabled.
 func TestServer_DataTimeoutClearedAfterTransfer(t *testing.T) {
 	_, s, c, scanner := testServerAuthenticated(t, nil,
-		server.WithReadTimeout(0), server.WithDataTimeout(100*time.Millisecond))
+		server.WithCommandTimeout(0), server.WithDataTimeout(100*time.Millisecond))
 	defer func() {
 		_ = s.Close()
 		_ = c.Close()
@@ -2461,10 +2525,9 @@ func TestServer_MultiDigitEnhancedCode(t *testing.T) {
 	require.Equal(t, "550 5.7.26 policy", readReply(t, c, scanner))
 }
 
-// A client that sends commands but never reads the replies is disconnected after the write timeout.
-func TestServer_WriteTimeoutCloses(t *testing.T) {
-	_, s, c, _ := testServerGreeted(t, nil,
-		server.WithWriteTimeout(100*time.Millisecond), server.WithReadTimeout(time.Minute))
+// A client that sends commands but never reads the replies is disconnected after the command timeout.
+func TestServer_CommandTimeoutUnreadReplies(t *testing.T) {
+	_, s, c, _ := testServerGreeted(t, nil, server.WithCommandTimeout(100*time.Millisecond))
 	defer func() {
 		_ = s.Close()
 		_ = c.Close()
@@ -2480,5 +2543,5 @@ func TestServer_WriteTimeoutCloses(t *testing.T) {
 			return // connection closed by the server
 		}
 	}
-	t.Fatal("Expected the write timeout to close the connection")
+	t.Fatal("Expected the command timeout to close the connection")
 }

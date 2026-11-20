@@ -41,9 +41,9 @@ type Server struct {
 	// Writer buffer size.
 	writerSize int
 
-	readTimeout  time.Duration
-	writeTimeout time.Duration
-	dataTimeout  time.Duration
+	commandTimeout      time.Duration
+	dataTimeout         time.Duration
+	tlsHandshakeTimeout time.Duration
 
 	implicitTLS bool
 
@@ -166,14 +166,15 @@ func New(opts ...Option) *Server {
 		enableCHUNKING: true,
 
 		// RFC 5321 (Section 4.5.3.2.7) recommends at least 5 minutes.
-		readTimeout: 5 * time.Minute,
+		commandTimeout: 5 * time.Minute,
 
 		// Whole DATA or BDAT transfer, RFC 5321 (Section 4.5.3.2.6) lets a
 		// client wait 10 minutes for the reply after the data, so the transfer
 		// itself gets the same. With 32 MiB this requires about 55 KB/s.
 		dataTimeout: 10 * time.Minute,
 
-		writeTimeout: 5 * time.Minute,
+		// Implicit TLS and STARTTLS, very generous like the client.
+		tlsHandshakeTimeout: 30 * time.Second,
 
 		// Commands and the message are read through this buffer. DATA is read
 		// line by line, with 32 KiB a 13 MB message needs about 400 instead
@@ -234,12 +235,14 @@ func WithNetwork(network string) Option {
 	}
 }
 
-// WithReadTimeout sets the read timeout for every command line.
+// WithCommandTimeout sets the timeout for every command line and its reply,
+// it covers waiting for the command as well as writing the reply.
+// The deadline is renewed lazily, so a timeout fires after 100% to 125% of it.
 // DATA and BDAT transfers use the data timeout instead, see WithDataTimeout.
 // Defaults to 5 minutes, zero disables the timeout.
-func WithReadTimeout(readTimeout time.Duration) Option {
+func WithCommandTimeout(commandTimeout time.Duration) Option {
 	return func(s *Server) {
-		s.readTimeout = readTimeout
+		s.commandTimeout = commandTimeout
 	}
 }
 
@@ -253,11 +256,11 @@ func WithDataTimeout(dataTimeout time.Duration) Option {
 	}
 }
 
-// WithWriteTimeout sets the write timeout.
-// Defaults to 5 minutes, zero disables the timeout.
-func WithWriteTimeout(writeTimeout time.Duration) Option {
+// WithTLSHandshakeTimeout sets the timeout for the TLS handshake of implicit TLS and STARTTLS.
+// Defaults to 30 seconds, zero disables the timeout.
+func WithTLSHandshakeTimeout(tlsHandshakeTimeout time.Duration) Option {
 	return func(s *Server) {
-		s.writeTimeout = writeTimeout
+		s.tlsHandshakeTimeout = tlsHandshakeTimeout
 	}
 }
 

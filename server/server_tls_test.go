@@ -4,8 +4,10 @@ import (
 	"bufio"
 	"crypto/tls"
 	"io"
+	"net"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/uponusolutions/deltasmtp/server"
@@ -210,4 +212,47 @@ func TestServerStartTlsDiscardsSettings(t *testing.T) {
 	_, _ = io.WriteString(c, "AUTH PLAIN AHVzZXJuYW1lAHBhc3N3b3Jk\r\n")
 	scan(t, c, scanner)
 	require.Equal(t, "235 2.0.0 Authentication succeeded", scanner.Text())
+}
+
+// requireClosedWithin checks that the server closes c within d.
+func requireClosedWithin(t *testing.T, c net.Conn, d time.Duration) {
+	t.Helper()
+	start := time.Now()
+	_ = c.SetReadDeadline(start.Add(5 * time.Second))
+	_, err := io.Copy(io.Discard, c)
+	require.NoError(t, err) // EOF, not the read deadline
+	require.Less(t, time.Since(start), d)
+}
+
+// A client that never starts the implicit TLS handshake is disconnected after the
+// TLS handshake timeout, not the command timeout.
+func TestServerTLSHandshakeTimeoutImplicitTLS(t *testing.T) {
+	cert, err := tester.GenX509KeyPair("localhost")
+	require.NoError(t, err)
+
+	_, _, c, _ := testServer(t, nil,
+		server.WithImplicitTLS(true),
+		server.WithTLSConfig(&tls.Config{Certificates: []tls.Certificate{cert}}),
+		server.WithTLSHandshakeTimeout(100*time.Millisecond))
+	defer func() { _ = c.Close() }()
+
+	requireClosedWithin(t, c, 2*time.Second)
+}
+
+// A client that never completes the STARTTLS handshake is disconnected after the
+// TLS handshake timeout, not the command timeout.
+func TestServerTLSHandshakeTimeoutStartTLS(t *testing.T) {
+	cert, err := tester.GenX509KeyPair("localhost")
+	require.NoError(t, err)
+
+	_, _, c, scanner, _ := testServerEhlo(t, nil,
+		server.WithTLSConfig(&tls.Config{Certificates: []tls.Certificate{cert}}),
+		server.WithTLSHandshakeTimeout(100*time.Millisecond))
+	defer func() { _ = c.Close() }()
+
+	_, _ = io.WriteString(c, "STARTTLS\r\n")
+	scanOk(t, c, scanner)
+	require.True(t, strings.HasPrefix(scanner.Text(), "220 "), scanner.Text())
+
+	requireClosedWithin(t, c, 2*time.Second)
 }

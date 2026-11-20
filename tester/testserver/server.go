@@ -26,8 +26,7 @@ import (
 func Standard(opts ...server.Option) *server.Server {
 	defaultOpts := []server.Option{
 		server.WithAddr(":0"),
-		server.WithReadTimeout(10 * time.Second),
-		server.WithWriteTimeout(10 * time.Second),
+		server.WithCommandTimeout(10 * time.Second),
 		server.WithMaxMessageBytes(1024 * 1024),
 		server.WithMaxRecipients(100),
 		server.WithBackend(NewBackend()),

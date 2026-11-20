@@ -45,6 +45,7 @@ type Client struct {
 	// keep a reference to the connection so it can be used to create a TLS
 	// connection later
 	conn     net.Conn
+	deadline deadline.Renewer // command deadline of conn
 	receiver *smtpreader.Receiver
 	sender   *smtpwriter.Sender
 
@@ -148,20 +149,7 @@ type VrfyOptions struct {
 // An existing connection is closed first.
 // If an error occurs, the connection is closed.
 func (c *Client) Dial(ctx context.Context, addr string) error {
-	_ = c.Close()
-
-	conn, err := c.netDialer().DialContext(ctx, "tcp", addr)
-	if err != nil {
-		return err
-	}
-	c.connAddress = addr
-
-	return c.initConn(conn, true)
-}
-
-// netDialer returns the dialer of the connections.
-func (c *Client) netDialer() *net.Dialer {
-	return &net.Dialer{Timeout: c.cfg.dialTimeout, Control: c.cfg.dialControl}
+	return c.dial(ctx, addr, false, nil)
 }
 
 // DialTLS returns a connection to an SMTP server at addr via TLS.
@@ -171,19 +159,49 @@ func (c *Client) netDialer() *net.Dialer {
 // An existing connection is closed first.
 // If an error occurs, the connection is closed.
 func (c *Client) DialTLS(ctx context.Context, config *tls.Config, addr string) error {
+	return c.dial(ctx, addr, true, config)
+}
+
+func (c *Client) dial(ctx context.Context, addr string, implicitTLS bool, config *tls.Config) error {
 	_ = c.Close()
 
-	tlsDialer := tls.Dialer{
-		NetDialer: c.netDialer(),
-		Config:    config,
-	}
-	conn, err := tlsDialer.DialContext(ctx, "tcp", addr)
+	dialer := &net.Dialer{Timeout: c.cfg.dialTimeout, Control: c.cfg.dialControl}
+	conn, err := dialer.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return err
 	}
 	c.connAddress = addr
 
+	if implicitTLS {
+		host, _, _ := net.SplitHostPort(addr)
+		if conn, err = c.handshake(ctx, conn, config, host); err != nil {
+			return err
+		}
+	}
+
 	return c.initConn(conn, true)
+}
+
+// handshake starts TLS on conn within the TLS handshake timeout, conn is closed on
+// error. A nil config is equivalent to a zero tls.Config, serverName is used if the
+// config has none.
+func (c *Client) handshake(ctx context.Context, conn net.Conn, config *tls.Config, serverName string) (net.Conn, error) {
+	if config == nil {
+		config = &tls.Config{}
+	}
+	if config.ServerName == "" && serverName != "" {
+		// Make a copy to avoid polluting argument
+		config = config.Clone()
+		config.ServerName = serverName
+	}
+
+	tlsConn := tls.Client(conn, config)
+	deadline.Set(tlsConn, c.cfg.tlsHandshakeTimeout)
+	if err := tlsConn.HandshakeContext(ctx); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	return tlsConn, nil
 }
 
 // initConn sets the underlying network connection for the client,
@@ -204,6 +222,7 @@ func (c *Client) initConn(conn net.Conn, expectGreet bool) error {
 // setConn sets the underlying network connection.
 func (c *Client) setConn(conn net.Conn) {
 	c.conn = conn
+	c.deadline.Reset()
 
 	if c.receiver != nil {
 		c.receiver.Reset(conn)
@@ -257,7 +276,7 @@ func (c *Client) receiveResponseValid(expectCode int) error {
 // if an error occurred the connection is closed
 func (c *Client) greet() error {
 	// Initial greeting timeout. RFC 5321 recommends 5 minutes.
-	deadline.Set(c.conn, c.cfg.commandTimeout)
+	c.deadline.Set(c.conn, c.cfg.commandTimeout)
 
 	status, err := c.receiveResponse()
 	if err != nil {
@@ -335,7 +354,7 @@ func (c *Client) cmd(expectCode int, message string) (*deltasmtp.Status, error) 
 		return nil, ErrNotConnected
 	}
 
-	deadline.Set(c.conn, c.cfg.commandTimeout)
+	c.deadline.Set(c.conn, c.cfg.commandTimeout)
 
 	_, err := c.sender.WriteString(message)
 	if err != nil {
@@ -371,7 +390,7 @@ func (c *Client) cmdValid(pType pipeliningType, expectCode int, message string) 
 		return ErrNotConnected
 	}
 
-	deadline.Set(c.conn, c.cfg.commandTimeout)
+	c.deadline.Set(c.conn, c.cfg.commandTimeout)
 
 	if c.PipeliningActive() {
 		// group is concluded, please consume all responses
@@ -440,7 +459,7 @@ func (c *Client) Conclude() error {
 		return ErrNotConnected
 	}
 
-	deadline.Set(c.conn, c.cfg.commandTimeout)
+	c.deadline.Set(c.conn, c.cfg.commandTimeout)
 
 	if !c.PipeliningActive() {
 		return ErrPipeliningNotEnabled
@@ -458,7 +477,7 @@ func (c *Client) readResponseValid(expectCode int) error {
 		return err
 	}
 
-	deadline.Set(c.conn, c.cfg.commandTimeout)
+	c.deadline.Set(c.conn, c.cfg.commandTimeout)
 
 	// Make sure everything is flushed, probably already done if group has ended.
 	if err := c.sender.Flush(); err != nil {
@@ -538,32 +557,13 @@ func (c *Client) StartTLS(config *tls.Config, serverName string) error {
 		return err
 	}
 
-	if config == nil {
-		config = &tls.Config{
-			ServerName: serverName,
-		}
-	} else if config.ServerName == "" && serverName != "" {
-		// Make a copy to avoid polluting argument
-		config = config.Clone()
-		config.ServerName = serverName
-	}
-
-	conn := tls.Client(c.conn, config)
-
-	deadline.Set(conn, c.cfg.tlsHandshakeTimeout)
-
-	err := conn.Handshake()
+	conn, err := c.handshake(context.Background(), c.conn, config, serverName)
 	if err != nil {
 		_ = c.Close()
 		return err
 	}
 
-	err = c.initConn(conn, false)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return c.initConn(conn, false)
 }
 
 // TLSConnectionState returns the client's TLS connection state.

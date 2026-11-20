@@ -1264,6 +1264,64 @@ func timeoutServer(t *testing.T, ext string, n int, stall func(c net.Conn, r *bu
 	return l.Addr().String()
 }
 
+// The command deadline is renewed lazily, but every command still has at least the
+// command timeout, also right after a renewal was skipped. A reply that never comes
+// fails after at most 125% of the timeout.
+func TestClientCommandTimeoutRenewed(t *testing.T) {
+	const timeout = 400 * time.Millisecond
+	addr := timeoutServer(t, "8BITMIME", 0, func(c net.Conn, r *bufio.Reader) {
+		for range 3 {
+			_, _ = r.ReadString('\n')
+			time.Sleep(timeout / 5)
+			_, _ = io.WriteString(c, "250 ok\r\n")
+			_, _ = r.ReadString('\n')     // the renewal for this command is skipped
+			time.Sleep(timeout * 19 / 20) // slow, but in time
+			_, _ = io.WriteString(c, "250 ok\r\n")
+		}
+		_, _ = io.Copy(io.Discard, r) // read, never reply
+	})
+	c := New(WithCommandTimeout(timeout))
+	require.NoError(t, c.Dial(context.Background(), addr))
+
+	// 3.5 times the timeout in total
+	for range 6 {
+		require.NoError(t, c.Noop())
+	}
+
+	start := time.Now()
+	err := c.Noop()
+	elapsed := time.Since(start)
+	var netErr net.Error
+	require.ErrorAs(t, err, &netErr)
+	require.True(t, netErr.Timeout())
+	require.GreaterOrEqual(t, elapsed, timeout)
+	require.Less(t, elapsed, timeout*5/4+100*time.Millisecond)
+}
+
+// A server that never completes the TLS handshake of DialTLS fails it after the
+// TLS handshake timeout, not the dial timeout.
+func TestClientTLSHandshakeTimeoutDialTLS(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = l.Close() })
+	go func() {
+		c, err := l.Accept()
+		if err == nil {
+			defer func() { _ = c.Close() }()
+			_, _ = io.Copy(io.Discard, c) // read, never answer
+		}
+	}()
+
+	c := New(WithTLSHandshakeTimeout(100 * time.Millisecond))
+	start := time.Now()
+	err = c.DialTLS(context.Background(), nil, l.Addr().String())
+	var netErr net.Error
+	require.ErrorAs(t, err, &netErr)
+	require.True(t, netErr.Timeout())
+	require.Less(t, time.Since(start), 3*time.Second)
+	require.False(t, c.Connected())
+}
+
 // A zero timeout disables the timeout instead of failing at once.
 func TestClientZeroTimeouts(t *testing.T) {
 	addr := timeoutServer(t, "8BITMIME", 1, func(net.Conn, *bufio.Reader) {})
@@ -1373,6 +1431,36 @@ func TestClientDataTimeoutClearedAfterTransfer(t *testing.T) {
 	require.NoError(t, w.Close())
 
 	time.Sleep(200 * time.Millisecond)
+	require.NoError(t, c.Noop())
+}
+
+// After a quick transfer the next command gets the command timeout again, not the
+// rest of the data deadline.
+func TestClientCommandTimeoutAfterTransfer(t *testing.T) {
+	addr := timeoutServer(t, "8BITMIME", 2, func(c net.Conn, r *bufio.Reader) {
+		_, _ = r.ReadString('\n')
+		_, _ = io.WriteString(c, "354 go ahead\r\n")
+		for {
+			line, err := r.ReadString('\n')
+			if err != nil || line == ".\r\n" {
+				break
+			}
+		}
+		_, _ = io.WriteString(c, "250 queued\r\n")
+		_, _ = r.ReadString('\n')
+		time.Sleep(200 * time.Millisecond) // after the data deadline
+		_, _ = io.WriteString(c, "250 ok\r\n")
+	})
+	c := New(WithCommandTimeout(time.Minute), WithDataTimeout(100*time.Millisecond))
+	require.NoError(t, c.Dial(context.Background(), addr))
+	require.NoError(t, c.Mail("a@example.org", nil))
+	require.NoError(t, c.Rcpt("b@example.org", nil))
+	w, err := c.Data()
+	require.NoError(t, err)
+	_, err = w.Write([]byte("Subject: test\r\n\r\nHey\r\n"))
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
+
 	require.NoError(t, c.Noop())
 }
 

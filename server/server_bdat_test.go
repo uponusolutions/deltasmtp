@@ -116,9 +116,9 @@ func writeSlowly(c net.Conn, s string, parts int, pause time.Duration) {
 }
 
 // BDAT uses the data timeout, a chunk taking longer than the read timeout must succeed.
-func TestServerBdatReadTimeoutSlowChunk(t *testing.T) {
+func TestServerBdatCommandTimeoutSlowChunk(t *testing.T) {
 	be, s, c, scanner, _ := testServerEhlo(t, nil,
-		server.WithEnableCHUNKING(true), server.WithReadTimeout(150*time.Millisecond))
+		server.WithEnableCHUNKING(true), server.WithCommandTimeout(150*time.Millisecond))
 	defer func() {
 		_ = s.Close()
 		_ = c.Close()
@@ -143,9 +143,9 @@ func TestServerBdatReadTimeoutSlowChunk(t *testing.T) {
 }
 
 // Discarding a BDAT chunk uses the data timeout, it may take longer than the read timeout.
-func TestServerBdatReadTimeoutSlowDiscard(t *testing.T) {
+func TestServerBdatCommandTimeoutSlowDiscard(t *testing.T) {
 	_, s, c, scanner, _ := testServerEhlo(t, nil,
-		server.WithEnableCHUNKING(true), server.WithReadTimeout(150*time.Millisecond))
+		server.WithEnableCHUNKING(true), server.WithCommandTimeout(150*time.Millisecond))
 	defer func() {
 		_ = s.Close()
 		_ = c.Close()

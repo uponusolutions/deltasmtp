@@ -101,5 +101,6 @@ func (d *ContentCloser) Close() error {
 // the deadline of the data timeout covers the whole transfer.
 func (c *Client) newContentCloser(writer io.WriteCloser) *ContentCloser {
 	deadline.Set(c.conn, c.cfg.dataTimeout)
+	c.deadline.Reset()
 	return &ContentCloser{c: c, writer: writer}
 }

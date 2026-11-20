@@ -49,6 +49,8 @@ type Conn struct {
 	receiver *smtpreader.Receiver
 	sender   *smtpwriter.Sender
 
+	deadline deadline.Renewer // command deadline of conn
+
 	state state
 
 	server *Server
@@ -86,7 +88,7 @@ func (c *Conn) run() (err error) {
 	c.greet()
 
 	for {
-		c.renewReadDeadline()
+		c.renewDeadline()
 		cmd, arg, err = c.nextCommand()
 		if err != nil {
 			return err
@@ -103,6 +105,8 @@ func (c *Conn) run() (err error) {
 
 				// ToDo: close connection on repeated errors (e.g. authentication tries)
 
+				// fresh deadlines for the reply after a DATA or BDAT transfer
+				c.renewDeadline()
 				c.writeStatus(smtpErr)
 				continue
 			}
@@ -479,6 +483,9 @@ func (c *Conn) limits() string {
 
 // handleError handles error and closes the connection afterwards.
 func (c *Conn) handleError(err error) {
+	// e.g. after a timeout the deadline is over, the reply needs a new one
+	c.renewDeadline()
+
 	if err == io.EOF || errors.Is(err, net.ErrClosed) {
 		c.Close(fmt.Errorf("connection closed unexpectedly: %w", err))
 		return
@@ -940,7 +947,7 @@ func (c *Conn) handleAuth(arg string) error {
 		}
 		c.writeStatus(deltasmtp.NewStatusS(334, deltasmtp.NoEnhancedCode, encoded))
 
-		c.renewReadDeadline()
+		c.renewDeadline()
 		encoded, err = c.readLine()
 		if err != nil {
 			return err
@@ -988,9 +995,7 @@ func (c *Conn) handleStartTLS() error {
 	// Upgrade to TLS
 	tlsConn := tls.Server(c.conn, tlsConfig)
 
-	c.renewReadDeadline()
-
-	if err := tlsConn.HandshakeContext(c.ctx); err != nil {
+	if err := c.handshake(tlsConn); err != nil {
 		// err is not a smtp error and will terminate the connection
 		return err
 	}
@@ -1122,6 +1127,8 @@ func (c *Conn) handleBdat(arg string) error {
 		if closed {
 			return "", "", io.EOF
 		}
+		// the reply between chunks isn't limited by the data deadline
+		deadline.SetWrite(c.conn, c.server.commandTimeout)
 		c.writeStatus(deltasmtp.BDATContinue)
 		return c.nextCommand()
 	})
@@ -1192,8 +1199,6 @@ func (c *Conn) writeStatus(status *deltasmtp.Status) {
 		c.ctx, "write status", slog.Any("status", status),
 	)
 
-	deadline.SetWrite(c.conn, c.server.writeTimeout)
-
 	_, err := status.WriteTo(c.sender)
 
 	// PIPELINE support
@@ -1219,16 +1224,26 @@ func (c *Conn) newStatusError(status *deltasmtp.Status, err error) *deltasmtp.St
 	return status
 }
 
-// renewReadDeadline sets the read deadline to now plus the read timeout,
-// a zero read timeout means no deadline.
-func (c *Conn) renewReadDeadline() {
-	deadline.SetRead(c.conn, c.server.readTimeout)
+// renewDeadline renews the deadline to at least now plus the command timeout,
+// a zero timeout means no deadline. It is called before a command line is read
+// and covers the reply to the command as well.
+func (c *Conn) renewDeadline() {
+	c.deadline.Set(c.conn, c.server.commandTimeout)
 }
 
-// setDataDeadline sets the read deadline for a whole DATA or BDAT transfer
-// to now plus the data timeout, a zero data timeout means no deadline.
+// setDataDeadline sets the read and write deadline for a whole DATA or BDAT
+// transfer to now plus the data timeout, a zero data timeout means no deadline.
 func (c *Conn) setDataDeadline() {
-	deadline.SetRead(c.conn, c.server.dataTimeout)
+	deadline.Set(c.conn, c.server.dataTimeout)
+	c.deadline.Reset()
+}
+
+// handshake runs the TLS handshake within the TLS handshake timeout,
+// the next renewal sets the command deadline again.
+func (c *Conn) handshake(tlsConn *tls.Conn) error {
+	deadline.Set(tlsConn, c.server.tlsHandshakeTimeout)
+	c.deadline.Reset()
+	return tlsConn.HandshakeContext(c.ctx)
 }
 
 // readLine reads a line of input.

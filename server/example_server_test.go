@@ -114,8 +114,7 @@ func ExampleServer() {
 		server.WithBackend(be),
 		server.WithAddr(addr),
 		server.WithHostname("localhost"),
-		server.WithWriteTimeout(10*time.Second),
-		server.WithReadTimeout(10*time.Second),
+		server.WithCommandTimeout(10*time.Second),
 		server.WithMaxMessageBytes(1024*1024),
 		server.WithMaxRecipients(50),
 	)

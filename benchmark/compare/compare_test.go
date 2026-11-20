@@ -131,8 +131,7 @@ func startDelta(b *testing.B, chunking bool) (string, func()) {
 		server.WithMaxTransactions(0),
 		server.WithMaxConnections(0),
 		server.WithMaxConnectionsPerIP(0),
-		server.WithReadTimeout(0),
-		server.WithWriteTimeout(0),
+		server.WithCommandTimeout(0),
 		server.WithDataTimeout(0),
 	)
 
