@@ -229,6 +229,17 @@ make bench-compare # comparison with go-smtp (separate module in benchmark/compa
 make stats   # benchstat over .bench/*.txt
 ```
 
+`.devcontainer/` holds a development container for [Devsy](https://devsy.sh)
+with everything above (Go 1.27.4 on Alpine, gcc for the race detector, the
+tools of `go.tool.mod`). The developer has no root: no sudo, no setuid
+binaries, no capabilities. There is no ssh client and `SSH_AUTH_SOCK` is
+cleared, push from the host. SSH agent forwarding is a client setting, turn it
+off once (check the option names with `devsy context options`):
+
+```sh
+devsy context set-options -o SSH_AGENT_FORWARDING=false
+```
+
 ## Licence
 
 MIT

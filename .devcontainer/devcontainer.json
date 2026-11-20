@@ -1,0 +1,40 @@
+// Development container of deltasmtp, used with Devsy.
+//
+// No root for the developer: the container runs as the user "dev", there is
+// no sudo and no setuid binary, and no-new-privileges prevents gaining
+// privileges. All capabilities are dropped except the four the agent Devsy
+// injects needs: it runs as root to chown the workspace (CHOWN, DAC_OVERRIDE)
+// and switches to "dev" for every session and lifecycle command (SETUID,
+// SETGID). Processes of "dev" have no capabilities at all.
+//
+// No SSH: the image has no ssh client and SSH_AUTH_SOCK is cleared. Agent
+// forwarding itself is a setting of the Devsy client, not of this file, turn
+// it off there (context option SSH_AGENT_FORWARDING=false, see README).
+{
+  "name": "deltasmtp",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+
+  "containerUser": "dev",
+  "remoteUser": "dev",
+  // Matches the UID of dev to the host user, so the workspace stays writable.
+  "updateRemoteUserUID": true,
+
+  "runArgs": [
+    "--cap-drop=ALL",
+    "--cap-add=CHOWN",
+    "--cap-add=DAC_OVERRIDE",
+    "--cap-add=SETUID",
+    "--cap-add=SETGID",
+    "--security-opt=no-new-privileges"
+  ],
+
+  "remoteEnv": {
+    "SSH_AUTH_SOCK": ""
+  },
+
+  // Warms the module caches and builds the tools of go.tool.mod
+  // (golangci-lint, benchstat, cover) once, make lint is fast afterwards.
+  "postCreateCommand": "go mod download && go -C benchmark/compare mod download && go tool -modfile=go.tool.mod golangci-lint version"
+}
