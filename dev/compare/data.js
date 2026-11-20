@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795168159294,
+  "lastUpdate": 1795169636023,
   "repoUrl": "https://github.com/uponusolutions/deltasmtp",
   "entries": {
     "Compare with go-smtp": [
@@ -2352,6 +2352,270 @@ window.BENCHMARK_DATA = {
             "value": 76,
             "unit": "allocs/op",
             "extra": "177 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "marcel.link@uponu.com",
+            "name": "Marcel Link",
+            "username": "ml1nk"
+          },
+          "committer": {
+            "email": "marcel.link@uponu.com",
+            "name": "Marcel Link",
+            "username": "ml1nk"
+          },
+          "distinct": true,
+          "id": "e57557eebb26bc5f2fe0776d3476ad86ec9a4e90",
+          "message": "chore: devcontainer, tools",
+          "timestamp": "2026-11-20T11:02:11+01:00",
+          "tree_id": "76a13b3b08deacac4d021873d54a43aaf10dff8d",
+          "url": "https://github.com/uponusolutions/deltasmtp/commit/e57557eebb26bc5f2fe0776d3476ad86ec9a4e90"
+        },
+        "date": 1795169635607,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkEndToEnd/Small/DeltaSMTP",
+            "value": 55955,
+            "unit": "ns/op\t  63.16 MB/s\t   41672 B/op\t      83 allocs/op",
+            "extra": "213346 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEndToEnd/Small/DeltaSMTP - ns/op",
+            "value": 55955,
+            "unit": "ns/op",
+            "extra": "213346 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEndToEnd/Small/DeltaSMTP - MB/s",
+            "value": 63.16,
+            "unit": "MB/s",
+            "extra": "213346 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEndToEnd/Small/DeltaSMTP - B/op",
+            "value": 41672,
+            "unit": "B/op",
+            "extra": "213346 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEndToEnd/Small/DeltaSMTP - allocs/op",
+            "value": 83,
+            "unit": "allocs/op",
+            "extra": "213346 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEndToEnd/Small/GoSMTP",
+            "value": 154412,
+            "unit": "ns/op\t  22.89 MB/s\t   41371 B/op\t      76 allocs/op",
+            "extra": "74334 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEndToEnd/Small/GoSMTP - ns/op",
+            "value": 154412,
+            "unit": "ns/op",
+            "extra": "74334 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEndToEnd/Small/GoSMTP - MB/s",
+            "value": 22.89,
+            "unit": "MB/s",
+            "extra": "74334 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEndToEnd/Small/GoSMTP - B/op",
+            "value": 41371,
+            "unit": "B/op",
+            "extra": "74334 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEndToEnd/Small/GoSMTP - allocs/op",
+            "value": 76,
+            "unit": "allocs/op",
+            "extra": "74334 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEndToEnd/Large/DeltaSMTP",
+            "value": 5638818,
+            "unit": "ns/op\t2372.20 MB/s\t   41672 B/op\t      83 allocs/op",
+            "extra": "2202 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEndToEnd/Large/DeltaSMTP - ns/op",
+            "value": 5638818,
+            "unit": "ns/op",
+            "extra": "2202 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEndToEnd/Large/DeltaSMTP - MB/s",
+            "value": 2372.2,
+            "unit": "MB/s",
+            "extra": "2202 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEndToEnd/Large/DeltaSMTP - B/op",
+            "value": 41672,
+            "unit": "B/op",
+            "extra": "2202 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEndToEnd/Large/DeltaSMTP - allocs/op",
+            "value": 83,
+            "unit": "allocs/op",
+            "extra": "2202 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEndToEnd/Large/GoSMTP",
+            "value": 123111898,
+            "unit": "ns/op\t 108.65 MB/s\t   41692 B/op\t      76 allocs/op",
+            "extra": "100 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEndToEnd/Large/GoSMTP - ns/op",
+            "value": 123111898,
+            "unit": "ns/op",
+            "extra": "100 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEndToEnd/Large/GoSMTP - MB/s",
+            "value": 108.65,
+            "unit": "MB/s",
+            "extra": "100 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEndToEnd/Large/GoSMTP - B/op",
+            "value": 41692,
+            "unit": "B/op",
+            "extra": "100 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEndToEnd/Large/GoSMTP - allocs/op",
+            "value": 76,
+            "unit": "allocs/op",
+            "extra": "100 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkData/Small/DeltaSMTP",
+            "value": 57218,
+            "unit": "ns/op\t  61.76 MB/s\t   41653 B/op\t      82 allocs/op",
+            "extra": "205548 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkData/Small/DeltaSMTP - ns/op",
+            "value": 57218,
+            "unit": "ns/op",
+            "extra": "205548 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkData/Small/DeltaSMTP - MB/s",
+            "value": 61.76,
+            "unit": "MB/s",
+            "extra": "205548 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkData/Small/DeltaSMTP - B/op",
+            "value": 41653,
+            "unit": "B/op",
+            "extra": "205548 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkData/Small/DeltaSMTP - allocs/op",
+            "value": 82,
+            "unit": "allocs/op",
+            "extra": "205548 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkData/Small/GoSMTP",
+            "value": 153913,
+            "unit": "ns/op\t  22.96 MB/s\t   41373 B/op\t      76 allocs/op",
+            "extra": "78680 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkData/Small/GoSMTP - ns/op",
+            "value": 153913,
+            "unit": "ns/op",
+            "extra": "78680 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkData/Small/GoSMTP - MB/s",
+            "value": 22.96,
+            "unit": "MB/s",
+            "extra": "78680 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkData/Small/GoSMTP - B/op",
+            "value": 41373,
+            "unit": "B/op",
+            "extra": "78680 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkData/Small/GoSMTP - allocs/op",
+            "value": 76,
+            "unit": "allocs/op",
+            "extra": "78680 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkData/Large/DeltaSMTP",
+            "value": 11873052,
+            "unit": "ns/op\t1126.62 MB/s\t   41653 B/op\t      82 allocs/op",
+            "extra": "1087 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkData/Large/DeltaSMTP - ns/op",
+            "value": 11873052,
+            "unit": "ns/op",
+            "extra": "1087 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkData/Large/DeltaSMTP - MB/s",
+            "value": 1126.62,
+            "unit": "MB/s",
+            "extra": "1087 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkData/Large/DeltaSMTP - B/op",
+            "value": 41653,
+            "unit": "B/op",
+            "extra": "1087 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkData/Large/DeltaSMTP - allocs/op",
+            "value": 82,
+            "unit": "allocs/op",
+            "extra": "1087 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkData/Large/GoSMTP",
+            "value": 121298517,
+            "unit": "ns/op\t 110.28 MB/s\t   41688 B/op\t      76 allocs/op",
+            "extra": "100 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkData/Large/GoSMTP - ns/op",
+            "value": 121298517,
+            "unit": "ns/op",
+            "extra": "100 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkData/Large/GoSMTP - MB/s",
+            "value": 110.28,
+            "unit": "MB/s",
+            "extra": "100 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkData/Large/GoSMTP - B/op",
+            "value": 41688,
+            "unit": "B/op",
+            "extra": "100 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkData/Large/GoSMTP - allocs/op",
+            "value": 76,
+            "unit": "allocs/op",
+            "extra": "100 times\n4 procs"
           }
         ]
       }
