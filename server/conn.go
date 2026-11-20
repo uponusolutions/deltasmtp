@@ -468,14 +468,15 @@ func (c *Conn) handleGreetResponse() *deltasmtp.Status {
 func (c *Conn) limits() string {
 	var sb strings.Builder
 	for _, l := range []struct {
-		name  string
-		value int
+		prefix string
+		value  int
 	}{
-		{"MAILMAX", c.server.maxTransactions},
-		{"RCPTMAX", c.server.maxRecipients},
+		{" MAILMAX=", c.server.maxTransactions},
+		{" RCPTMAX=", c.server.maxRecipients},
 	} {
 		if l.value > 0 && l.value <= 999999 {
-			sb.WriteString(" " + l.name + "=" + strconv.Itoa(l.value))
+			sb.WriteString(l.prefix)
+			sb.WriteString(strconv.Itoa(l.value))
 		}
 	}
 	return sb.String()

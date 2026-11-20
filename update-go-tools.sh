@@ -22,4 +22,12 @@ cd ..
 rm go.tool.mod go.tool.sum
 mv tmp/go.mod go.tool.mod
 mv tmp/go.sum go.tool.sum
+
+# gopls gets its own tool module, it requires another golang.org/x/tools than golangci-lint
+cd tmp
+echo "module github.com/uponusolutions/deltasmtp" > go.mod
+go get -tool golang.org/x/tools/gopls
+cd ..
+mv tmp/go.mod go.gopls.mod
+mv tmp/go.sum go.gopls.sum
 rm -r -f tmp

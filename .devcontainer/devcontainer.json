@@ -35,6 +35,6 @@
   },
 
   // Warms the module caches and builds the tools of go.tool.mod
-  // (golangci-lint, benchstat, cover) once, make lint is fast afterwards.
-  "postCreateCommand": "go mod download && go -C benchmark/compare mod download && go tool -modfile=go.tool.mod golangci-lint version"
+  // (golangci-lint, benchstat, cover) and go.gopls.mod once, make lint is fast afterwards.
+  "postCreateCommand": "go mod download && go -C benchmark/compare mod download && go tool -modfile=go.tool.mod golangci-lint version && go tool -modfile=go.gopls.mod gopls version"
 }
