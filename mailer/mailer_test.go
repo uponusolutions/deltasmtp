@@ -232,39 +232,6 @@ func TestClient_SendMail(t *testing.T) {
 	}
 }
 
-func TestClient_SendMailTooManyRcptsAbortPipelining(t *testing.T) {
-	c := New(withTestServer(addr[0]),
-		WithAbortOnRcptReject(true),
-		WithBasic(client.WithPipelining(true)))
-	require.NotNil(t, c)
-
-	require.NoError(t, c.Connect(context.Background()))
-	defer func() {
-		assert.NoError(t, c.Terminate())
-
-		// Calling again must be ok.
-		assert.NoError(t, c.Disconnect())
-	}()
-
-	data := []byte("Hello World!")
-	from := "alice@internal.com"
-	recipients := makeEmails(1001)
-
-	in := bytes.NewBuffer(data)
-
-	status, failures, err := c.Send(context.Background(), from, recipients, in)
-	require.Equal(t,
-		deltasmtp.NewStatusS(452, deltasmtp.EnhancedCode{4, 5, 3}, "Maximum limit of 1000 recipients reached"),
-		err,
-	)
-	require.Nil(t, status)
-	require.Equal(t, 0, len(failures))
-
-	_, failures, err = c.Send(context.Background(), from, recipients[0:1000], in)
-	require.NoError(t, err)
-	require.Equal(t, 0, len(failures))
-}
-
 func TestClient_SendMailDirect(t *testing.T) {
 	data := []byte("Hello World!")
 	from := "alice@internal.com"
@@ -399,23 +366,6 @@ func TestClient_SendMailDirectFailPipelining(t *testing.T) {
 	t.Logf("Found %t, mail %+v\n", found, m)
 }
 
-func TestClient_SendMailDirectAbortOnRcptRejectPipelining(t *testing.T) {
-	data := []byte("Hello World!")
-	from := "alice@internal.com"
-	recipients := []string{"Bob@external.com", "notfound@external.com", "mal@external.com"}
-
-	_, err := Send(
-		context.Background(),
-		from,
-		recipients,
-		func() io.Reader { return bytes.NewReader(data) },
-		withTestServer(addr[0]),
-		WithAbortOnRcptReject(true),
-		WithBasic(client.WithPipelining(true)),
-	)
-	require.ErrorContains(t, err, "not supported")
-}
-
 func TestClient_SendMailDirectAllRejectedPipelining(t *testing.T) {
 	data := []byte("Hello World!")
 	from := "alice@internal.com"
@@ -522,124 +472,6 @@ func TestClient_SendMailPartiallyRejectedKeepsPerRcptFailures(t *testing.T) {
 				"delivered recipients must exclude the rejected one")
 		})
 	}
-}
-
-func TestClient_SendMailAutoconnectAbortOnRcptReject(t *testing.T) {
-	c := New(withTestServer(addr[0]), WithAbortOnRcptReject(true),
-		WithBasic(client.WithPipelining(false)))
-	require.NotNil(t, c)
-
-	defer func() {
-		require.NoError(t, c.Disconnect())
-	}()
-
-	data := []byte("Hello World!")
-	from := "alice@internal.com"
-	recipients := []string{"Bob@external.com", "notfound@external.com", "mal@external.com"}
-
-	in := bytes.NewBuffer(data)
-
-	_, _, err := c.Send(context.Background(), from, recipients, in)
-	require.ErrorContains(t, err, "notfound@external.com")
-
-	recipients = []string{"Bob@external.com", "mal@external.com"}
-
-	_, _, err = c.Send(context.Background(), from, recipients, in)
-	require.NoError(t, err)
-
-	// Lookup email.
-	m, found := testserver.GetBackend(s[0]).Load(from, recipients)
-	assert.True(t, found)
-
-	t.Logf("Found %t, mail %+v\n", found, m)
-}
-
-func TestClient_SendMailAutoconnectAbortOnRcptRejectPipelining(t *testing.T) {
-	c := New(withTestServer(addr[0]), WithAbortOnRcptReject(true), WithBasic(client.WithPipelining(true)))
-	require.NotNil(t, c)
-
-	defer func() {
-		require.NoError(t, c.Disconnect())
-	}()
-
-	data := []byte("Hello World!")
-	from := "alice@internal.com"
-	recipients := []string{"Bob@external.com", "notfound@external.com", "mal@external.com"}
-
-	in := bytes.NewBuffer(data)
-
-	_, _, err := c.Send(context.Background(), from, recipients, in)
-	require.ErrorContains(t, err, "notfound@external.com")
-
-	recipients = []string{"Bob@external.com", "mal@external.com"}
-
-	_, _, err = c.Send(context.Background(), from, recipients, in)
-	require.NoError(t, err)
-
-	// Lookup email.
-	m, found := testserver.GetBackend(s[0]).Load(from, recipients)
-	assert.True(t, found)
-
-	t.Logf("Found %t, mail %+v\n", found, m)
-}
-
-func TestClient_SendMailAutoconnectAbortOnRcptRejectAll(t *testing.T) {
-	c := New(withTestServer(addr[0]), WithAbortOnRcptReject(true),
-		WithBasic(client.WithPipelining(false)))
-	require.NotNil(t, c)
-
-	defer func() {
-		require.NoError(t, c.Disconnect())
-	}()
-
-	data := []byte("Hello World!")
-	from := "alice@internal.com"
-	recipients := []string{"notfound@external.com"}
-
-	in := bytes.NewBuffer(data)
-
-	_, _, err := c.Send(context.Background(), from, recipients, in)
-	require.ErrorContains(t, err, "notfound@external.com")
-
-	recipients = []string{"Bob@external.com"}
-
-	_, _, err = c.Send(context.Background(), from, recipients, in)
-	require.NoError(t, err)
-
-	// Lookup email.
-	m, found := testserver.GetBackend(s[0]).Load(from, recipients)
-	assert.True(t, found)
-
-	t.Logf("Found %t, mail %+v\n", found, m)
-}
-
-func TestClient_SendMailAutoconnectAbortOnRcptRejectAllPipelining(t *testing.T) {
-	c := New(withTestServer(addr[0]), WithAbortOnRcptReject(true), WithBasic(client.WithPipelining(true)))
-	require.NotNil(t, c)
-
-	defer func() {
-		require.NoError(t, c.Disconnect())
-	}()
-
-	data := []byte("Hello World!")
-	from := "alice@internal.com"
-	recipients := []string{"notfound@external.com"}
-
-	in := bytes.NewBuffer(data)
-
-	_, _, err := c.Send(context.Background(), from, recipients, in)
-	require.ErrorContains(t, err, "notfound@external.com")
-
-	recipients = []string{"Bob@external.com"}
-
-	_, _, err = c.Send(context.Background(), from, recipients, in)
-	require.NoError(t, err)
-
-	// Lookup email.
-	m, found := testserver.GetBackend(s[0]).Load(from, recipients)
-	assert.True(t, found)
-
-	t.Logf("Found %t, mail %+v\n", found, m)
 }
 
 func TestClient_SendMailDirectFail(t *testing.T) {

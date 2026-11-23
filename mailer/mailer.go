@@ -189,7 +189,7 @@ func (c *Mailer) prepare(
 				err = c.client.Rcpt(addr, rcptsOption)
 			}
 			if err != nil {
-				failures, err = rcptError(addr, c.cfg.abortOnRcptReject, failures, err)
+				failures, err = rcptError(addr, failures, err)
 				if err != nil {
 					return nil, failures, err
 				}
@@ -201,14 +201,6 @@ func (c *Mailer) prepare(
 	// Without pipelining every RCPT response is known, don't send DATA without a recipient.
 	if !c.client.PipeliningActive() && len(failures) == len(rcpts) {
 		return nil, failures, nil
-	}
-
-	// sync before calling data if abortOnRcptReject is true
-	if c.client.PipeliningActive() && c.cfg.abortOnRcptReject {
-		var err error
-		if _, failures, err = c.handleResponses(pipelining, rcpts, failures, size); err != nil {
-			return nil, failures, err
-		}
 	}
 
 	// DATA
@@ -254,9 +246,9 @@ func (c *Mailer) handleResponses(pipelining *pipeliningPending, rcpts []string, 
 
 	for _, addr := range pendingRcpts {
 		if err := c.client.RcptResponse(); err != nil {
-			failures, err = rcptError(addr, c.cfg.abortOnRcptReject, failures, err)
+			failures, err = rcptError(addr, failures, err)
 			if err != nil {
-				// pipelining.data is never true here, because abortOnRcptReject forces sync before calling data
+				// Clears the pending DATA response as well, if any.
 				if !c.client.Connected() {
 					return nil, failures, err
 				}
@@ -315,9 +307,10 @@ func (c *Mailer) abort(err error) error {
 	return errors.Join(err, c.client.Close())
 }
 
-func rcptError(addr string, abortOnRcptReject bool, failures []resolve.Failure, err error) ([]resolve.Failure, error) {
-	// continue sending if code is not 421 and abort on rcpt reject is disabled
-	if smtpErr, ok := err.(*deltasmtp.Status); !ok || abortOnRcptReject || smtpErr.Code == 421 {
+// rcptError records a rejected recipient as failure. Errors other than a rejection
+// (connection errors and 421, the server closing the connection) are returned.
+func rcptError(addr string, failures []resolve.Failure, err error) ([]resolve.Failure, error) {
+	if smtpErr, ok := err.(*deltasmtp.Status); !ok || smtpErr.Code == 421 {
 		return nil, err
 	}
 
@@ -482,7 +475,6 @@ type Response struct {
 
 // Send just sends a mail.
 // in is called multiple times if there are recipients from different servers.
-// The option abort on recipient rejection is permanently not supported.
 //
 // The default SecurityStartTLS also applies to delivery via MX records:
 // servers without STARTTLS or a valid certificate fail. Pass
@@ -492,10 +484,6 @@ func Send(ctx context.Context, from string, rcpts []string, in func() io.Reader,
 	r := resolve.New(nil)
 
 	config := NewConfig(opts...)
-
-	if config.extra.abortOnRcptReject {
-		return Report{}, errors.New("abort on recipient rejection is not supported")
-	}
 
 	var mx resolve.Result
 
