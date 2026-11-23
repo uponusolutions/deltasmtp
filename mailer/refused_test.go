@@ -1,0 +1,88 @@
+package mailer
+
+import (
+	"bytes"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"github.com/uponusolutions/deltasmtp/client"
+	"github.com/uponusolutions/deltasmtp/resolve"
+)
+
+// refusedRcpts contains an address the client refuses between valid ones and a rejected one
+// after it, with pipelining the responses must still be matched to the right recipients.
+var refusedRcpts = []string{"bob@external.com", "bad\r\n@external.com", "notfound@external.com", "carol@external.com"}
+
+// requireRefusedFailures checks the failures of refusedRcpts.
+func requireRefusedFailures(t *testing.T, failures []resolve.Failure) {
+	t.Helper()
+
+	require.Len(t, failures, 2)
+	assert.Equal(t, []string{"bad\r\n@external.com"}, failures[0].Rcpts)
+	require.ErrorIs(t, failures[0].Error, client.ErrRefused)
+	assert.Equal(t, []string{"notfound@external.com"}, failures[1].Rcpts)
+	require.ErrorContains(t, failures[1].Error, "550")
+}
+
+// TestMailer_RefusedRcpt checks that a recipient refused by the client is a failure
+// and keeps the connection.
+func TestMailer_RefusedRcpt(t *testing.T) {
+	for _, pc := range pipeliningCases {
+		t.Run(pc.name, func(t *testing.T) {
+			srv, opts := newVerifyServer(t, pc.pipelining)
+			m := New(opts...)
+			t.Cleanup(func() { _ = m.Terminate() })
+
+			status, failures, err := m.Send(t.Context(), "alice@internal.com", refusedRcpts,
+				bytes.NewBufferString("Hello World!\r\n"))
+			require.NoError(t, err)
+			require.NotNil(t, status)
+			requireRefusedFailures(t, failures)
+
+			failures, err = m.Verify(t.Context(), VerifyRcpt, "alice@internal.com", refusedRcpts)
+			require.NoError(t, err)
+			requireRefusedFailures(t, failures)
+
+			failures, err = m.Verify(t.Context(), VerifyVrfy, "alice@internal.com", refusedRcpts)
+			require.NoError(t, err)
+			requireRefusedFailures(t, failures)
+
+			// every recipient refused
+			status, failures, err = m.Send(t.Context(), "alice@internal.com", refusedRcpts[1:2],
+				bytes.NewBufferString("Hello World!\r\n"))
+			require.NoError(t, err)
+			assert.Nil(t, status)
+			require.Len(t, failures, 1)
+
+			assert.True(t, m.Connected())
+			assert.Equal(t, 1, connections(srv))
+		})
+	}
+}
+
+// TestMailer_RefusedMail checks that a MAIL FROM refused by the client is returned
+// as error and keeps the connection.
+func TestMailer_RefusedMail(t *testing.T) {
+	for _, pc := range pipeliningCases {
+		t.Run(pc.name, func(t *testing.T) {
+			srv, opts := newVerifyServer(t, pc.pipelining)
+			m := New(opts...)
+			t.Cleanup(func() { _ = m.Terminate() })
+
+			_, _, err := m.SendAdvanced(t.Context(), "alice@internal.com", &client.MailOptions{RequireTLS: true},
+				[]string{"bob@external.com"}, nil, bytes.NewBufferString("Hello World!\r\n"))
+			require.ErrorIs(t, err, client.ErrRefused)
+
+			_, err = m.VerifyAdvanced(t.Context(), VerifyRcpt, "alice@internal.com",
+				&client.MailOptions{SMTPUTF8: true}, []string{"bob@external.com"})
+			require.ErrorIs(t, err, client.ErrRefused)
+
+			_, failures, err := m.Send(t.Context(), "alice@internal.com", []string{"bob@external.com"},
+				bytes.NewBufferString("Hello World!\r\n"))
+			require.NoError(t, err)
+			require.Empty(t, failures)
+			assert.Equal(t, 1, connections(srv))
+		})
+	}
+}

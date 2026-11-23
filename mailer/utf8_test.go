@@ -101,11 +101,14 @@ func TestVerifyAutoUTF8(t *testing.T) {
 	// addr[0] doesn't support SMTPUTF8.
 	c := New(withTestServer(addr[0]))
 	t.Cleanup(func() { _ = c.Terminate() })
-	require.NoError(t, c.Connect(t.Context()))
+	// 252 without SMTPUTF8.
+	failures, err := c.Verify(t.Context(), VerifyVrfy, "", []string{"bob@external.com"})
+	require.NoError(t, err)
+	require.Empty(t, failures)
 
-	// 252, but without SMTPUTF8.
-	err := c.Verify("bob@external.com", nil)
-	require.Error(t, err)
-	assert.NotContains(t, err.Error(), "SMTPUTF8")
-	require.ErrorContains(t, c.Verify("jösé@external.com", nil), "server does not support SMTPUTF8")
+	failures, err = c.Verify(t.Context(), VerifyVrfy, "", []string{"jösé@external.com"})
+	require.NoError(t, err)
+	require.Len(t, failures, 1)
+	require.ErrorContains(t, failures[0].Error, "server does not support SMTPUTF8")
+	assert.True(t, c.Connected())
 }

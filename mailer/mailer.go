@@ -162,37 +162,9 @@ func (c *Mailer) prepare(
 ) (*client.ContentCloser, []resolve.Failure, error) {
 	pipelining := &pipeliningPending{}
 
-	// MAIL FROM:
-	// No congestion possible on the first call
-	if err := c.client.Mail(from, mailOptions); err != nil {
-		return nil, nil, err
-	}
-	pipelining.mail = true
-
-	failures := []resolve.Failure{}
-
-	// RCPT TO:
-	for i, addr := range rcpts {
-		var rcptsOption *deltasmtp.RcptOptions
-		if len(rcptsOptions) > i {
-			rcptsOption = rcptsOptions[i]
-		}
-
-		if err := c.client.Rcpt(addr, rcptsOption); err != nil {
-			if err == client.ErrPipeliningCongestion {
-				if _, failures, err = c.handleResponses(pipelining, rcpts, failures, size); err != nil {
-					return nil, failures, err
-				}
-				err = c.client.Rcpt(addr, rcptsOption)
-			}
-			if err != nil {
-				failures, err = rcptError(addr, failures, err)
-				if err != nil {
-					return nil, failures, err
-				}
-			}
-		}
-		pipelining.rcpts++
+	failures, err := c.envelope(pipelining, from, mailOptions, rcpts, rcptsOptions, size)
+	if err != nil {
+		return nil, failures, err
 	}
 
 	// Without pipelining every RCPT response is known, don't send DATA without a recipient.
@@ -219,6 +191,61 @@ func (c *Mailer) prepare(
 	}
 
 	return w, failures, nil
+}
+
+// envelope sends MAIL FROM and RCPT TO for every recipient.
+// With pipelining the responses not read yet are recorded in pipelining.
+func (c *Mailer) envelope(
+	pipelining *pipeliningPending,
+	from string,
+	mailOptions *client.MailOptions,
+	rcpts []string,
+	rcptsOptions []*deltasmtp.RcptOptions,
+	size int,
+) ([]resolve.Failure, error) {
+	// MAIL FROM:
+	// No congestion possible on the first call
+	if err := c.client.Mail(from, mailOptions); err != nil {
+		return nil, err
+	}
+	pipelining.mail = true
+
+	failures := []resolve.Failure{}
+
+	// RCPT TO:
+	for i, addr := range rcpts {
+		var rcptsOption *deltasmtp.RcptOptions
+		if len(rcptsOptions) > i {
+			rcptsOption = rcptsOptions[i]
+		}
+
+		err := c.client.Rcpt(addr, rcptsOption)
+		if err == client.ErrPipeliningCongestion {
+			if _, failures, err = c.handleResponses(pipelining, rcpts, failures, size); err != nil {
+				return failures, err
+			}
+			err = c.client.Rcpt(addr, rcptsOption)
+		}
+
+		// The pending responses are matched to rcpts by position, read them and skip addr, it wasn't sent.
+		if errors.Is(err, client.ErrRefused) && c.client.PipeliningActive() {
+			var errResponses error
+			if _, failures, errResponses = c.handleResponses(pipelining, rcpts, failures, size); errResponses != nil {
+				return failures, errResponses
+			}
+			pipelining.rcptsOffset++
+		} else {
+			pipelining.rcpts++
+		}
+
+		if err != nil {
+			if failures, err = rcptError(addr, failures, err); err != nil {
+				return failures, err
+			}
+		}
+	}
+
+	return failures, nil
 }
 
 func (c *Mailer) handleResponses(pipelining *pipeliningPending, rcpts []string, failures []resolve.Failure, size int) (*client.ContentCloser, []resolve.Failure, error) {
@@ -293,22 +320,24 @@ func (c *Mailer) contentResponse(allRejected bool, failures []resolve.Failure, s
 }
 
 // reset resets open mail transfer and is pipelining aware
-func (c *Mailer) reset() (err error) {
-	err = c.client.Reset()
-	if !c.client.PipeliningActive() {
+func (c *Mailer) reset() error {
+	return c.cmd(c.client.Reset(), c.client.ResetResponse)
+}
+
+// cmd returns the result of a command sent with err.
+// With pipelining active the response is read by response.
+func (c *Mailer) cmd(err error, response func() error) error {
+	if err != nil || !c.client.PipeliningActive() {
 		return err
 	}
-	if err != nil {
-		return err
-	}
-	return c.client.ResetResponse()
+	return response()
 }
 
 // abort ends a failed transaction and returns err.
-// An *deltasmtp.Status error leaves the connection in sync, so it is kept after a successful RSET.
+// A rejection leaves the connection in sync, so it is kept after a successful RSET.
 // Any other error, or a failing RSET, leaves it in an unknown state and it is closed.
 func (c *Mailer) abort(err error) error {
-	if _, ok := err.(*deltasmtp.Status); ok {
+	if isRejection(err) {
 		errReset := c.reset()
 		if errReset == nil {
 			return err
@@ -318,11 +347,21 @@ func (c *Mailer) abort(err error) error {
 	return errors.Join(err, c.client.Close())
 }
 
-// rcptError records a rejected recipient as failure. Errors other than a rejection
-// (connection errors and 421, the server closing the connection) are returned.
+// isRejection reports whether err rejects a single command and leaves the connection in sync:
+// a server reply other than 421 (the server closes the connection) or a refusal of the client.
+func isRejection(err error) bool {
+	if smtpErr, ok := err.(*deltasmtp.Status); ok {
+		return smtpErr.Code != 421
+	}
+
+	return errors.Is(err, client.ErrRefused)
+}
+
+// rcptError records a rejected recipient as failure.
+// Other errors are returned with the failures recorded so far.
 func rcptError(addr string, failures []resolve.Failure, err error) ([]resolve.Failure, error) {
-	if smtpErr, ok := err.(*deltasmtp.Status); !ok || smtpErr.Code == 421 {
-		return nil, err
+	if !isRejection(err) {
+		return failures, err
 	}
 
 	failures = append(failures, resolve.Failure{
@@ -434,36 +473,102 @@ func (c *Mailer) SendAdvanced(
 	return status, failures, nil
 }
 
-// Verify checks the validity of an email address on the server.
-// If Verify returns nil, the address is valid. A non-nil return
-// does not necessarily indicate an invalid address. Many servers
-// will not verify addresses for security reasons.
+// VerifyMode selects the command Verify checks recipients with.
+type VerifyMode int
+
+const (
+	// VerifyVrfy checks recipients with VRFY (RFC 5321 section 3.5.1).
+	// 252 (can't verify, but accepts mail) counts as accepted, many servers answer every VRFY with it.
+	VerifyVrfy VerifyMode = iota
+	// VerifyRcpt checks recipients with RCPT TO in a mail transaction that is ended by RSET.
+	VerifyRcpt
+)
+
+// Verify is VerifyAdvanced without mailOptions.
+func (c *Mailer) Verify(ctx context.Context, mode VerifyMode, from string, rcpts []string) ([]resolve.Failure, error) {
+	return c.VerifyAdvanced(ctx, mode, from, nil, rcpts)
+}
+
+// VerifyAdvanced checks with mode whether the server accepts rcpts as recipients of a mail from from.
+// The rejected recipients are returned as failures, the others are accepted.
+// A rejection doesn't necessarily mean the address is invalid.
 //
-// If opts isn't set, SMTPUTF8 is used if the server supports it or addr needs it.
-func (c *Mailer) Verify(addr string, opts *client.VrfyOptions) error {
-	if opts == nil {
-		opts = &client.VrfyOptions{SMTPUTF8: !parse.IsASCII(addr) || c.supportsUTF8()}
+// It will use an existing connection if possible or create a new one otherwise.
+//
+// With VerifyRcpt, if mailOptions isn't set, SMTPUTF8 is used if the server supports it or an address needs it.
+// With VerifyVrfy, from is unused and, if mailOptions is set, only its SMTPUTF8 applies to every VRFY.
+// If it isn't set, SMTPUTF8 is used per address if the server supports it or the address needs it.
+//
+// On an error the recipients without failure couldn't be checked.
+func (c *Mailer) VerifyAdvanced(ctx context.Context, mode VerifyMode, from string, mailOptions *client.MailOptions, rcpts []string) ([]resolve.Failure, error) {
+	if len(rcpts) < 1 {
+		return nil, errors.New("no recipients")
 	}
-	err := c.client.Verify(addr, opts)
-	if !c.client.PipeliningActive() {
-		return err
+
+	// Connect closes the connection on failure.
+	if !c.client.Connected() {
+		if err := c.Connect(ctx); err != nil {
+			return nil, err
+		}
+	}
+
+	if mode == VerifyVrfy {
+		return c.vrfy(mailOptions, rcpts)
+	}
+
+	if mailOptions == nil {
+		c.mailOptions = client.MailOptions{SMTPUTF8: needsUTF8(from, rcpts) || c.supportsUTF8()}
+		mailOptions = &c.mailOptions
+	}
+
+	pipelining := &pipeliningPending{}
+
+	failures, err := c.envelope(pipelining, from, mailOptions, rcpts, nil, 0)
+	if err == nil && c.client.PipeliningActive() {
+		_, failures, err = c.handleResponses(pipelining, rcpts, failures, 0)
 	}
 	if err != nil {
-		return err
+		return failures, c.abort(err)
 	}
-	return c.client.VerifyResponse()
+
+	if err = c.reset(); err != nil {
+		return failures, errors.Join(err, c.client.Close())
+	}
+
+	return failures, nil
+}
+
+// vrfy checks every recipient with VRFY, VRFY can't be pipelined.
+func (c *Mailer) vrfy(mailOptions *client.MailOptions, rcpts []string) ([]resolve.Failure, error) {
+	failures := []resolve.Failure{}
+
+	for _, addr := range rcpts {
+		opts := client.VrfyOptions{SMTPUTF8: !parse.IsASCII(addr) || c.supportsUTF8()}
+		if mailOptions != nil {
+			opts.SMTPUTF8 = mailOptions.SMTPUTF8
+		}
+
+		err := c.cmd(c.client.Verify(addr, &opts), c.client.VerifyResponse)
+		if err == nil {
+			continue
+		}
+
+		if failures, err = rcptError(addr, failures, err); err != nil {
+			return failures, errors.Join(err, c.client.Close())
+		}
+	}
+
+	return failures, nil
+}
+
+// Noop sends NOOP to check that the connection is usable.
+func (c *Mailer) Noop() error {
+	return c.cmd(c.client.Noop(), c.client.NoopResponse)
 }
 
 // Disconnect ends current connection gracefully, if any exists.
-func (c *Mailer) Disconnect() (err error) {
-	err = c.client.Quit()
-	if !c.client.PipeliningActive() {
-		return err
-	}
-	if err != nil {
-		return err
-	}
-	return c.client.QuitResponse()
+func (c *Mailer) Disconnect() error {
+	return c.cmd(c.client.Quit(), c.client.QuitResponse)
 }
 
 // Terminate ends current connection forcefully.
@@ -506,26 +611,11 @@ type Response struct {
 // WithSecurity(SecurityPreferStartTLS) for opportunistic TLS as usual between
 // mail servers.
 func Send(ctx context.Context, from string, rcpts []string, in func() io.Reader, opts ...Option) (res Report, err error) {
-	r := resolve.New(nil)
-
 	config := NewConfig(opts...)
 
-	var mx resolve.Result
-
-	if len(config.extra.serverAddresses) > 0 {
-		mx = resolve.Result{
-			Servers: []resolve.Server{
-				{
-					Rcpts:     rcpts,
-					Addresses: config.extra.serverAddresses,
-				},
-			},
-		}
-	} else {
-		mx, err = r.Recipients(context.Background(), rcpts)
-		if err != nil {
-			return Report{}, err
-		}
+	mx, err := servers(ctx, rcpts, config)
+	if err != nil {
+		return Report{}, err
 	}
 
 	res.Failures = mx.Failures
@@ -561,6 +651,17 @@ func Send(ctx context.Context, from string, rcpts []string, in func() io.Reader,
 	return res, nil
 }
 
+// servers returns the configured server addresses for all rcpts, or resolves the MX servers if none are set.
+func servers(ctx context.Context, rcpts []string, config Config) (resolve.Result, error) {
+	if len(config.extra.serverAddresses) > 0 {
+		return resolve.Result{Servers: []resolve.Server{{Rcpts: rcpts, Addresses: config.extra.serverAddresses}}}, nil
+	}
+
+	r := resolve.New(nil)
+
+	return r.Recipients(ctx, rcpts)
+}
+
 // acceptedRcpts returns rcpts without the recipients named by failures, keeping
 // the order. rcpts isn't modified, it may be the slice passed by the caller.
 //
@@ -589,6 +690,49 @@ func send(ctx context.Context, server resolve.Server, from string, config Config
 	defer func() { _ = client.Disconnect() }()
 
 	return client.Send(ctx, from, server.Rcpts, in)
+}
+
+// VerifyReport contains the result of verifying recipients.
+type VerifyReport struct {
+	// Accepted are the recipients accepted by their server.
+	Accepted []string
+	// Failures are the recipients that couldn't be resolved, were rejected or couldn't be checked.
+	Failures []resolve.Failure
+}
+
+// Verify checks with mode whether the servers of rcpts accept them as recipients of a mail from from.
+// See Send for the servers used.
+func Verify(ctx context.Context, mode VerifyMode, from string, rcpts []string, opts ...Option) (res VerifyReport, err error) {
+	config := NewConfig(opts...)
+
+	mx, err := servers(ctx, rcpts, config)
+	if err != nil {
+		return VerifyReport{}, err
+	}
+
+	res.Failures = mx.Failures
+
+	for _, server := range mx.Servers {
+		config.extra.serverAddresses = server.Addresses
+		m := NewFromConfig(config)
+		failures, err := m.Verify(ctx, mode, from, server.Rcpts)
+		_ = m.Disconnect()
+
+		accepted := acceptedRcpts(server.Rcpts, failures)
+		res.Failures = append(res.Failures, failures...)
+
+		// The recipients without failure couldn't be checked.
+		if err != nil {
+			if len(accepted) > 0 {
+				res.Failures = append(res.Failures, resolve.Failure{Rcpts: accepted, Error: err})
+			}
+			continue
+		}
+
+		res.Accepted = append(res.Accepted, accepted...)
+	}
+
+	return res, nil
 }
 
 // copyBuffers holds the buffers copying the message content, shared by all

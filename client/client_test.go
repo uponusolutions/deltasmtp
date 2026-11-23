@@ -107,9 +107,8 @@ func TestBasic(t *testing.T) {
 	if err := c.Verify("user1@gmail.com", nil); err == nil {
 		t.Fatal("First VRFY: expected no verification")
 	}
-	if err := c.Verify("user2@gmail.com>\r\nDATA\r\nAnother injected message body\r\n.\r\nQUIT\r\n", nil); err == nil {
-		t.Fatal("VRFY should have failed due to a message injection attempt")
-	}
+	err := c.Verify("user2@gmail.com>\r\nDATA\r\nAnother injected message body\r\n.\r\nQUIT\r\n", nil)
+	require.ErrorIs(t, err, ErrRefused, "VRFY should have failed due to a message injection attempt")
 	if err := c.Verify("user2@gmail.com", nil); err != nil {
 		t.Fatalf("Second VRFY: expected verification, got %s", err)
 	}
@@ -333,8 +332,8 @@ var basicServer = `250 mx.google.com at your service
 250-AUTH LOGIN PLAIN
 250 8BITMIME
 530 Authentication required
+550 5.1.1 User unknown
 252 Send some mail, I'll try my best
-250 User is valid
 235 Accepted
 250 Sender OK
 250 Receiver OK

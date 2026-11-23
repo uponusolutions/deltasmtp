@@ -594,11 +594,12 @@ func (c *Client) ChunkingActive() bool {
 }
 
 // Verify checks the validity of an email address on the server.
-// If Verify returns nil, the address is valid. A non-nil return
-// does not necessarily indicate an invalid address. Many servers
-// will not verify addresses for security reasons.
+// If Verify returns nil, the server answered 250, 251 or 252 (RFC 5321 section 3.5.3).
+// 252 means the server can't verify the address but accepts mail for it,
+// many servers answer every VRFY with it for security reasons.
+// A non-nil return does not necessarily indicate an invalid address.
 //
-// If server returns an error, it will be of type *deltasmtp.
+// If server returns an error, it will be of type *deltasmtp.Status.
 func (c *Client) Verify(addr string, opts *VrfyOptions) error {
 	if err := validateLine(addr); err != nil {
 		return err
@@ -613,17 +614,17 @@ func (c *Client) Verify(addr string, opts *VrfyOptions) error {
 
 	if opts != nil && opts.SMTPUTF8 {
 		if _, ok := c.session.ext["SMTPUTF8"]; !ok {
-			return errors.New("smtp: server does not support SMTPUTF8")
+			return refusedError("smtp: server does not support SMTPUTF8")
 		}
 		sb.WriteString(" SMTPUTF8")
 	}
 
-	return c.cmdValid(pipeliningTypeLast, 250, sb.String())
+	return c.cmdValid(pipeliningTypeLast, 25, sb.String())
 }
 
 // VerifyResponse returns the result of previous send verify command if pipelining is enabled
 func (c *Client) VerifyResponse() error {
-	return c.readResponseValid(250)
+	return c.readResponseValid(25)
 }
 
 // Auth authenticates a client using the provided authentication mechanism.
@@ -636,7 +637,7 @@ func (c *Client) Auth(saslClient sasl.Client) error {
 	}
 
 	if saslClient == nil {
-		return errors.New("smtp: SASL client is missing")
+		return refusedError("smtp: SASL client is missing")
 	}
 
 	encoding := base64.StdEncoding
@@ -745,13 +746,13 @@ func (c *Client) Mail(from string, opts *MailOptions) error {
 	}
 	if opts != nil && opts.RequireTLS {
 		if _, ok := c.session.ext["REQUIRETLS"]; !ok {
-			return errors.New("smtp: server does not support REQUIRETLS")
+			return refusedError("smtp: server does not support REQUIRETLS")
 		}
 		sb.WriteString(" REQUIRETLS")
 	}
 	if opts != nil && opts.SMTPUTF8 {
 		if _, ok := c.session.ext["SMTPUTF8"]; !ok {
-			return errors.New("smtp: server does not support SMTPUTF8")
+			return refusedError("smtp: server does not support SMTPUTF8")
 		}
 		sb.WriteString(" SMTPUTF8")
 	}
@@ -763,11 +764,11 @@ func (c *Client) Mail(from string, opts *MailOptions) error {
 		case "":
 			// This space is intentionally left blank
 		default:
-			return errors.New("smtp: Unknown RET parameter value")
+			return refusedError("smtp: Unknown RET parameter value")
 		}
 		if opts.EnvelopeID != "" {
 			if !parse.IsPrintableASCII(opts.EnvelopeID) {
-				return errors.New("smtp: Malformed ENVID parameter value")
+				return refusedError("smtp: Malformed ENVID parameter value")
 			}
 			sb.WriteString(" ENVID=")
 			sb.WriteString(encodeXtext(opts.EnvelopeID))
@@ -791,11 +792,11 @@ func (c *Client) Mail(from string, opts *MailOptions) error {
 	if _, ok := c.session.ext["DELIVERBY"]; ok && opts != nil && opts.DeliverBy != nil {
 		if opts.DeliverBy.Mode == deltasmtp.DeliverByReturn &&
 			(opts.DeliverBy.Seconds < 1 || opts.DeliverBy.Seconds > 999999999) {
-			return errors.New("smtp: DELIVERBY mode must be between 1 and 999999999 with return mode")
+			return refusedError("smtp: DELIVERBY mode must be between 1 and 999999999 with return mode")
 		}
 		if opts.DeliverBy.Mode == deltasmtp.DeliverByNotify &&
 			(opts.DeliverBy.Seconds < -999999999 || opts.DeliverBy.Seconds > 999999999) {
-			return errors.New("smtp: DELIVERBY mode must be between -999999999 and 999999999 with notify mode")
+			return refusedError("smtp: DELIVERBY mode must be between -999999999 and 999999999 with notify mode")
 		}
 		arg := fmt.Sprintf(" BY=%d;%s", int(opts.DeliverBy.Seconds), opts.DeliverBy.Mode)
 		if opts.DeliverBy.Trace {
@@ -805,7 +806,7 @@ func (c *Client) Mail(from string, opts *MailOptions) error {
 	}
 	if _, ok := c.session.ext["MT-PRIORITY"]; ok && opts != nil && opts.MTPriority != nil {
 		if *opts.MTPriority < -9 || *opts.MTPriority > 9 {
-			return errors.New("smtp: MT-PRIORITY must be between -9 and 9")
+			return refusedError("smtp: MT-PRIORITY must be between -9 and 9")
 		}
 		sb.WriteString(" MT-PRIORITY=")
 		sb.WriteString(strconv.Itoa(*opts.MTPriority))
@@ -858,7 +859,7 @@ func rcptDSN(sb *strings.Builder, opts *deltasmtp.RcptOptions, ext map[string]st
 	if len(opts.Notify) != 0 {
 		sb.WriteString(" NOTIFY=")
 		if err := parse.CheckNotifySet(opts.Notify); err != nil {
-			return errors.New("smtp: Malformed NOTIFY parameter value")
+			return refusedError("smtp: Malformed NOTIFY parameter value")
 		}
 		for i, v := range opts.Notify {
 			if i != 0 {
@@ -872,7 +873,7 @@ func rcptDSN(sb *strings.Builder, opts *deltasmtp.RcptOptions, ext map[string]st
 		switch opts.OriginalRecipientType {
 		case deltasmtp.DSNAddressTypeRFC822:
 			if !parse.IsPrintableASCII(opts.OriginalRecipient) {
-				return errors.New("smtp: Illegal address")
+				return refusedError("smtp: Illegal address")
 			}
 			enc = encodeXtext(opts.OriginalRecipient)
 		case deltasmtp.DSNAddressTypeUTF8:
@@ -882,7 +883,7 @@ func rcptDSN(sb *strings.Builder, opts *deltasmtp.RcptOptions, ext map[string]st
 				enc = encodeUTF8AddrXtext(opts.OriginalRecipient)
 			}
 		default:
-			return errors.New("smtp: Unknown address type")
+			return refusedError("smtp: Unknown address type")
 		}
 		sb.WriteString(" ORCPT=")
 		sb.WriteString(string(opts.OriginalRecipientType))
@@ -953,10 +954,10 @@ func (c *Client) Bdat(size int) (*ContentCloser, error) {
 	}
 
 	if !c.cfg.chunking {
-		return nil, errors.New("smtp: chunking is disabled on the client")
+		return nil, refusedError("smtp: chunking is disabled on the client")
 	}
 	if _, ok := c.session.ext["CHUNKING"]; !ok {
-		return nil, errors.New("smtp: server doesn't support chunking")
+		return nil, refusedError("smtp: server doesn't support chunking")
 	}
 
 	// the size is unknown, buffer to send chunks of chunkingBufferSize

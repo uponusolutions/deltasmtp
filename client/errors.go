@@ -17,4 +17,15 @@ var (
 		" please consume all pending responses")
 	// ErrPipeliningCongestion means you wrote to many bytes and the group was forcefully concluded.
 	ErrPipeliningCongestion = errors.New("pipelining group concluded because of congestion, please consume responses")
+	// ErrRefused means the client refused to send a command, e.g. for an invalid argument
+	// or an extension the server doesn't support. Nothing was sent, the connection is unchanged.
+	// Check with errors.Is, the error text names the reason.
+	ErrRefused = errors.New("smtp: command refused by the client")
 )
+
+// refusedError is a refusal of the client, it matches ErrRefused.
+type refusedError string
+
+func (e refusedError) Error() string { return string(e) }
+
+func (refusedError) Is(target error) bool { return target == ErrRefused }

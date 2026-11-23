@@ -693,8 +693,13 @@ func TestClient_VerifyUTF8Force(t *testing.T) {
 		assert.NoError(t, c.Disconnect())
 	}()
 
-	err := c.Verify("Bob@external.com", &client.VrfyOptions{SMTPUTF8: true})
-	require.ErrorContains(t, err, "server does not support SMTPUTF8")
+	failures, err := c.VerifyAdvanced(t.Context(), VerifyVrfy, "",
+		&client.MailOptions{SMTPUTF8: true}, []string{"Bob@external.com"})
+	require.NoError(t, err)
+	require.Len(t, failures, 1)
+	require.ErrorIs(t, failures[0].Error, client.ErrRefused)
+	require.ErrorContains(t, failures[0].Error, "server does not support SMTPUTF8")
+	assert.True(t, c.Connected())
 }
 
 func TestClient_InvalidLocalName(t *testing.T) {
