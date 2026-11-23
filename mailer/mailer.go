@@ -7,7 +7,6 @@ import (
 	"errors"
 	"io"
 	"net"
-	"slices"
 	"sync"
 
 	"github.com/uponusolutions/deltasmtp"
@@ -523,18 +522,7 @@ func Send(ctx context.Context, from string, rcpts []string, in func() io.Reader,
 		status, failures, err := send(ctx, server, from, config, in())
 
 		if len(failures) > 0 {
-			rcpts := []string{}
-
-		outer:
-			for _, rcpt := range server.Rcpts {
-				for _, fail := range failures {
-					if slices.Contains(fail.Rcpts, rcpt) {
-						continue outer
-					}
-				}
-				rcpts = append(rcpts, rcpt)
-			}
-			server.Rcpts = rcpts
+			server.Rcpts = acceptedRcpts(server.Rcpts, failures)
 			res.Failures = append(res.Failures, failures...)
 		}
 
@@ -559,6 +547,28 @@ func Send(ctx context.Context, from string, rcpts []string, in func() io.Reader,
 		}
 	}
 	return res, nil
+}
+
+// acceptedRcpts returns rcpts without the recipients named by failures, keeping
+// the order. rcpts isn't modified, it may be the slice passed by the caller.
+//
+// The failed recipients are collected in a set first, comparing every recipient
+// with every failure is quadratic and slow with many rejected recipients.
+func acceptedRcpts(rcpts []string, failures []resolve.Failure) []string {
+	failed := make(map[string]struct{}, len(failures))
+	for _, fail := range failures {
+		for _, rcpt := range fail.Rcpts {
+			failed[rcpt] = struct{}{}
+		}
+	}
+
+	accepted := make([]string, 0, max(len(rcpts)-len(failed), 0))
+	for _, rcpt := range rcpts {
+		if _, ok := failed[rcpt]; !ok {
+			accepted = append(accepted, rcpt)
+		}
+	}
+	return accepted
 }
 
 func send(ctx context.Context, server resolve.Server, from string, config Config, in io.Reader) (status *deltasmtp.Status, failures []resolve.Failure, err error) {

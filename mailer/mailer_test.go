@@ -10,12 +10,15 @@ import (
 	"io"
 	"log"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/uponusolutions/deltasmtp"
+	"github.com/uponusolutions/deltasmtp/resolve"
 	"github.com/uponusolutions/deltasmtp/server"
 	"github.com/uponusolutions/deltasmtp/tester"
 	"github.com/uponusolutions/deltasmtp/tester/testserver"
@@ -470,6 +473,101 @@ func TestClient_SendMailPartiallyRejectedKeepsPerRcptFailures(t *testing.T) {
 			require.Len(t, res.Responses, 1)
 			assert.Equal(t, accepted, res.Responses[0].Rcpts,
 				"delivered recipients must exclude the rejected one")
+		})
+	}
+}
+
+// TestClient_SendMailPartiallyRejectedManyRcpts checks that a partial rejection
+// doesn't make Send slow with many recipients. Sorting out the accepted
+// recipients must not compare every recipient with every failure.
+//
+// The time is compared with the same send without rejections, so the network
+// part, the race detector and the machine speed cancel out.
+func TestClient_SendMailPartiallyRejectedManyRcpts(t *testing.T) {
+	const n = 50000
+
+	send := func(rcpts []string) (Report, time.Duration) {
+		start := time.Now()
+		res, err := Send(
+			context.Background(),
+			"alice@internal.com",
+			rcpts,
+			func() io.Reader { return bytes.NewReader([]byte("Hello World!")) },
+			withTestServer(addr[2]),
+			WithBasic(client.WithPipelining(true)),
+		)
+		require.NoError(t, err)
+		return res, time.Since(start)
+	}
+
+	// every second recipient is rejected
+	rcpts := make([]string, n)
+	accepted := make([]string, 0, n/2)
+	for i := range rcpts {
+		if i%2 == 1 {
+			rcpts[i] = fmt.Sprintf("notfound%d@external.com", i)
+		} else {
+			rcpts[i] = fmt.Sprintf("%d@external.com", i)
+			accepted = append(accepted, rcpts[i])
+		}
+	}
+
+	_, baseline := send(makeEmails(n))
+	res, partial := send(rcpts)
+
+	require.Len(t, res.Failures, n/2)
+	require.Len(t, res.Responses, 1)
+	require.Equal(t, accepted, res.Responses[0].Rcpts)
+
+	limit := max(5*baseline, 500*time.Millisecond)
+	require.Less(t, partial, limit,
+		"partial rejection took %v, the send without rejections %v", partial, baseline)
+}
+
+func TestAcceptedRcpts(t *testing.T) {
+	errRejected := errors.New("rejected")
+	fail := func(rcpts ...string) resolve.Failure { return resolve.Failure{Rcpts: rcpts, Error: errRejected} }
+
+	for name, tc := range map[string]struct {
+		rcpts    []string
+		failures []resolve.Failure
+		want     []string
+	}{
+		"keeps order": {
+			rcpts:    []string{"a", "b", "c", "d"},
+			failures: []resolve.Failure{fail("b"), fail("d")},
+			want:     []string{"a", "c"},
+		},
+		"failure out of order": {
+			rcpts:    []string{"a", "b", "c"},
+			failures: []resolve.Failure{fail("c"), fail("a")},
+			want:     []string{"b"},
+		},
+		"failure with multiple recipients": {
+			rcpts:    []string{"a", "b", "c"},
+			failures: []resolve.Failure{fail("a", "c")},
+			want:     []string{"b"},
+		},
+		"duplicate recipient is removed each time": {
+			rcpts:    []string{"a", "b", "a"},
+			failures: []resolve.Failure{fail("a")},
+			want:     []string{"b"},
+		},
+		"unknown failed recipient": {
+			rcpts:    []string{"a", "b"},
+			failures: []resolve.Failure{fail("x"), fail("y"), fail("z")},
+			want:     []string{"a", "b"},
+		},
+		"all rejected": {
+			rcpts:    []string{"a", "b"},
+			failures: []resolve.Failure{fail("a"), fail("b")},
+			want:     []string{},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rcpts := slices.Clone(tc.rcpts)
+			require.Equal(t, tc.want, acceptedRcpts(rcpts, tc.failures))
+			require.Equal(t, tc.rcpts, rcpts, "rcpts must not be modified")
 		})
 	}
 }
