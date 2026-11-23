@@ -42,24 +42,26 @@ import (
 type Client struct {
 	cfg Config
 
-	// keep a reference to the connection so it can be used to create a TLS
-	// connection later
-	conn     net.Conn
-	deadline deadline.Renewer // command deadline of conn
+	session  session
+	deadline deadline.Renewer // command deadline of session.conn
 	receiver *smtpreader.Receiver
 	sender   *smtpwriter.Sender
+}
 
-	// connAddress is set on dial and is not reset on disconnect
-	// to be able to use ServerAddress() after disconnect
-	connAddress string // Format address:port.
-	// connName is set when the server greets the client and is not reset on disconnect
-	// to be able to use ServerAddress() after disconnect
-	connName string // server greet name
-	// connName is set when the server greets the client and is not reset on disconnect
-	// to be able to use Extension() after disconnect
-	connExt map[string]string // supported extensions of the server after ehlo
-	// connPipelining is set after ehlo and reset when connExt is set
-	connPipelining pipeliningState
+// session is the state of the current or, after disconnect, the last connection.
+//
+// Only conn is reset on disconnect, the rest is kept to be able to use
+// ServerAddress(), ServerName() and Extension() after disconnect. The whole
+// session is reset when dialing, so it never describes a server of a previous
+// connection.
+type session struct {
+	// keep a reference to the connection so it can be used to create a TLS
+	// connection later, nil if disconnected
+	conn       net.Conn
+	address    string            // Format address:port, set on dial.
+	name       string            // server greet name, set when the server greets the client
+	ext        map[string]string // supported extensions of the server after ehlo
+	pipelining pipeliningState   // reset when ext is set
 }
 
 type pipeliningState struct {
@@ -164,13 +166,14 @@ func (c *Client) DialTLS(ctx context.Context, config *tls.Config, addr string) e
 
 func (c *Client) dial(ctx context.Context, addr string, implicitTLS bool, config *tls.Config) error {
 	_ = c.Close()
+	c.session = session{}
 
 	dialer := &net.Dialer{Timeout: c.cfg.dialTimeout, Control: c.cfg.dialControl}
 	conn, err := dialer.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return err
 	}
-	c.connAddress = addr
+	c.session.address = addr
 
 	if implicitTLS {
 		host, _, _ := net.SplitHostPort(addr)
@@ -221,7 +224,7 @@ func (c *Client) initConn(conn net.Conn, expectGreet bool) error {
 
 // setConn sets the underlying network connection.
 func (c *Client) setConn(conn net.Conn) {
-	c.conn = conn
+	c.session.conn = conn
 	c.deadline.Reset()
 
 	if c.receiver != nil {
@@ -239,13 +242,13 @@ func (c *Client) setConn(conn net.Conn) {
 
 // Close closes the connection.
 func (c *Client) Close() (err error) {
-	if c.conn == nil {
+	if c.session.conn == nil {
 		return nil
 	}
 	c.receiver.Reset(nil)
 	c.sender.Reset(nil)
-	err = c.conn.Close()
-	c.conn = nil
+	err = c.session.conn.Close()
+	c.session.conn = nil
 	return err
 }
 
@@ -276,7 +279,7 @@ func (c *Client) receiveResponseValid(expectCode int) error {
 // if an error occurred the connection is closed
 func (c *Client) greet() error {
 	// Initial greeting timeout. RFC 5321 recommends 5 minutes.
-	c.deadline.Set(c.conn, c.cfg.commandTimeout)
+	c.deadline.Set(c.session.conn, c.cfg.commandTimeout)
 
 	status, err := c.receiveResponse()
 	if err != nil {
@@ -290,9 +293,9 @@ func (c *Client) greet() error {
 	}
 
 	if idx := strings.IndexRune(status.Lines[0], ' '); idx >= 0 {
-		c.connName = status.Lines[0][:idx]
+		c.session.name = status.Lines[0][:idx]
 	} else {
-		c.connName = status.Lines[0]
+		c.session.name = status.Lines[0]
 	}
 
 	return nil
@@ -322,9 +325,9 @@ func (c *Client) Hello() error {
 }
 
 func (c *Client) setExt(ext map[string]string) {
-	c.connExt = ext
-	c.connPipelining.concluded = false
-	c.connPipelining.pending = 0
+	c.session.ext = ext
+	c.session.pipelining.concluded = false
+	c.session.pipelining.pending = 0
 }
 
 func (c *Client) consumeResponse() error {
@@ -332,16 +335,16 @@ func (c *Client) consumeResponse() error {
 		return ErrPipeliningNotEnabled
 	}
 
-	if c.connPipelining.pending == 0 {
+	if c.session.pipelining.pending == 0 {
 		return ErrPipeliningNothingPending
 	}
 
 	// first consume concludes group
-	c.connPipelining.concluded = true
-	c.connPipelining.pending--
+	c.session.pipelining.concluded = true
+	c.session.pipelining.pending--
 
-	if c.connPipelining.pending == 0 {
-		c.connPipelining.concluded = false
+	if c.session.pipelining.pending == 0 {
+		c.session.pipelining.concluded = false
 	}
 
 	return nil
@@ -350,11 +353,11 @@ func (c *Client) consumeResponse() error {
 // cmd is a convenience function that sends a command and returns the response
 // does not support or handle anything related to pipelining
 func (c *Client) cmd(expectCode int, message string) (*deltasmtp.Status, error) {
-	if c.conn == nil {
+	if c.session.conn == nil {
 		return nil, ErrNotConnected
 	}
 
-	c.deadline.Set(c.conn, c.cfg.commandTimeout)
+	c.deadline.Set(c.session.conn, c.cfg.commandTimeout)
 
 	_, err := c.sender.WriteString(message)
 	if err != nil {
@@ -386,15 +389,15 @@ func (c *Client) cmd(expectCode int, message string) (*deltasmtp.Status, error) 
 // cmdValid is a convenience function that sends a command and returns an error if the expected code doesn't match
 // can handle pipelining
 func (c *Client) cmdValid(pType pipeliningType, expectCode int, message string) error {
-	if c.conn == nil {
+	if c.session.conn == nil {
 		return ErrNotConnected
 	}
 
-	c.deadline.Set(c.conn, c.cfg.commandTimeout)
+	c.deadline.Set(c.session.conn, c.cfg.commandTimeout)
 
 	if c.PipeliningActive() {
 		// group is concluded, please consume all responses
-		if c.connPipelining.concluded {
+		if c.session.pipelining.concluded {
 			return ErrPipeliningGroupConcluded
 		}
 		// RFC 2920
@@ -412,12 +415,12 @@ func (c *Client) cmdValid(pType pipeliningType, expectCode int, message string) 
 		// If the buffer can not hold the first request, ignore congestion.
 		// Typically the 4k buffio is enough to make it fast, it don't expect any buffers from tcp.
 		// Outcomment to see TestClient_SendMailDirectManyRcptsPipelining failing.
-		if len(message)+2 > c.sender.Available() && c.connPipelining.pending > 0 {
+		if len(message)+2 > c.sender.Available() && c.session.pipelining.pending > 0 {
 			err := c.sender.Flush()
 			if err != nil {
 				return err
 			}
-			c.connPipelining.concluded = true
+			c.session.pipelining.concluded = true
 			return ErrPipeliningCongestion
 		}
 	}
@@ -442,9 +445,9 @@ func (c *Client) cmdValid(pType pipeliningType, expectCode int, message string) 
 	}
 
 	if c.PipeliningActive() && pType > pipeliningTypeForbidden {
-		c.connPipelining.pending++
+		c.session.pipelining.pending++
 		if pType == pipeliningTypeLast {
-			c.connPipelining.concluded = true
+			c.session.pipelining.concluded = true
 		}
 		return nil
 	}
@@ -455,21 +458,21 @@ func (c *Client) cmdValid(pType pipeliningType, expectCode int, message string) 
 // Conclude concludes the current pipelining group.
 // Do not call if pipelining is not active.
 func (c *Client) Conclude() error {
-	if c.conn == nil {
+	if c.session.conn == nil {
 		return ErrNotConnected
 	}
 
-	c.deadline.Set(c.conn, c.cfg.commandTimeout)
+	c.deadline.Set(c.session.conn, c.cfg.commandTimeout)
 
 	if !c.PipeliningActive() {
 		return ErrPipeliningNotEnabled
 	}
-	c.connPipelining.concluded = true
+	c.session.pipelining.concluded = true
 	return c.sender.Flush()
 }
 
 func (c *Client) readResponseValid(expectCode int) error {
-	if c.conn == nil {
+	if c.session.conn == nil {
 		return ErrNotConnected
 	}
 
@@ -477,7 +480,7 @@ func (c *Client) readResponseValid(expectCode int) error {
 		return err
 	}
 
-	c.deadline.Set(c.conn, c.cfg.commandTimeout)
+	c.deadline.Set(c.session.conn, c.cfg.commandTimeout)
 
 	// Make sure everything is flushed, probably already done if group has ended.
 	if err := c.sender.Flush(); err != nil {
@@ -495,9 +498,9 @@ func (c *Client) ClearResponses(x int) error {
 	}
 
 	if x == 0 {
-		x = c.connPipelining.pending
+		x = c.session.pipelining.pending
 	} else if x < 0 {
-		x = c.connPipelining.pending + x
+		x = c.session.pipelining.pending + x
 		if x <= 0 {
 			return nil
 		}
@@ -549,7 +552,7 @@ func (c *Client) ehlo() error {
 // If the server rejects the command it returns the error and the connection is not closed.
 // If the server accepts the command but the tls handshake fails, the connection is closed.
 func (c *Client) StartTLS(config *tls.Config, serverName string) error {
-	if c.PipeliningActive() && c.connPipelining.pending > 0 {
+	if c.PipeliningActive() && c.session.pipelining.pending > 0 {
 		return ErrPipeliningNoPendingRequired
 	}
 
@@ -557,7 +560,7 @@ func (c *Client) StartTLS(config *tls.Config, serverName string) error {
 		return err
 	}
 
-	conn, err := c.handshake(context.Background(), c.conn, config, serverName)
+	conn, err := c.handshake(context.Background(), c.session.conn, config, serverName)
 	if err != nil {
 		_ = c.Close()
 		return err
@@ -570,7 +573,7 @@ func (c *Client) StartTLS(config *tls.Config, serverName string) error {
 // The return values are their zero values if STARTTLS did
 // not succeed.
 func (c *Client) TLSConnectionState() (tls.ConnectionState, bool) {
-	tc, ok := c.conn.(*tls.Conn)
+	tc, ok := c.session.conn.(*tls.Conn)
 	if !ok {
 		return tls.ConnectionState{}, false
 	}
@@ -579,14 +582,14 @@ func (c *Client) TLSConnectionState() (tls.ConnectionState, bool) {
 
 // PipeliningActive return if pipelining is active.
 func (c *Client) PipeliningActive() bool {
-	_, ok := c.connExt["PIPELINING"]
-	return ok && c.cfg.pipelining && c.conn != nil
+	_, ok := c.session.ext["PIPELINING"]
+	return ok && c.cfg.pipelining && c.session.conn != nil
 }
 
 // ChunkingActive reports whether Content and ContentResponse use BDAT instead of DATA.
 // With pipelining active, Content doesn't send BDAT, ContentResponse does.
 func (c *Client) ChunkingActive() bool {
-	_, ok := c.connExt["CHUNKING"]
+	_, ok := c.session.ext["CHUNKING"]
 	return ok && c.cfg.chunking
 }
 
@@ -610,7 +613,7 @@ func (c *Client) Verify(addr string, opts *VrfyOptions) error {
 
 	// By default utf8 is preferred
 	if opts == nil || opts.UTF8 != UTF8Disabled {
-		if _, ok := c.connExt["SMTPUTF8"]; ok {
+		if _, ok := c.session.ext["SMTPUTF8"]; ok {
 			sb.WriteString(" SMTPUTF8")
 		} else if opts != nil && opts.UTF8 == UTF8Force {
 			return errors.New("smtp: server does not support SMTPUTF8")
@@ -630,7 +633,7 @@ func (c *Client) VerifyResponse() error {
 //
 // If server returns an error, it will be of type *deltasmtp.
 func (c *Client) Auth(saslClient sasl.Client) error {
-	if c.PipeliningActive() && c.connPipelining.pending > 0 {
+	if c.PipeliningActive() && c.session.pipelining.pending > 0 {
 		return ErrPipeliningNoPendingRequired
 	}
 
@@ -734,29 +737,29 @@ func (c *Client) Mail(from string, opts *MailOptions) error {
 	sb.WriteString("MAIL FROM:<")
 	sb.WriteString(from)
 	sb.WriteString(">")
-	if _, ok := c.connExt["8BITMIME"]; ok {
+	if _, ok := c.session.ext["8BITMIME"]; ok {
 		sb.WriteString(" BODY=8BITMIME")
 	}
-	if _, ok := c.connExt["SIZE"]; ok && opts != nil && opts.Size != 0 {
+	if _, ok := c.session.ext["SIZE"]; ok && opts != nil && opts.Size != 0 {
 		var num [20]byte
 		sb.WriteString(" SIZE=")
 		sb.Write(strconv.AppendInt(num[:0], opts.Size, 10))
 	}
 	if opts != nil && opts.RequireTLS {
-		if _, ok := c.connExt["REQUIRETLS"]; !ok {
+		if _, ok := c.session.ext["REQUIRETLS"]; !ok {
 			return errors.New("smtp: server does not support REQUIRETLS")
 		}
 		sb.WriteString(" REQUIRETLS")
 	}
 	// By default utf8 is preferred
 	if opts == nil || opts.UTF8 != UTF8Disabled {
-		if _, ok := c.connExt["SMTPUTF8"]; ok {
+		if _, ok := c.session.ext["SMTPUTF8"]; ok {
 			sb.WriteString(" SMTPUTF8")
 		} else if opts != nil && opts.UTF8 == UTF8Force {
 			return errors.New("smtp: server does not support SMTPUTF8")
 		}
 	}
-	if _, ok := c.connExt["DSN"]; ok && opts != nil {
+	if _, ok := c.session.ext["DSN"]; ok && opts != nil {
 		switch opts.Return {
 		case deltasmtp.DSNReturnFull, deltasmtp.DSNReturnHeaders:
 			sb.WriteString(" RET=")
@@ -775,7 +778,7 @@ func (c *Client) Mail(from string, opts *MailOptions) error {
 		}
 	}
 	if opts != nil && opts.Auth != nil {
-		if _, ok := c.connExt["AUTH"]; ok {
+		if _, ok := c.session.ext["AUTH"]; ok {
 			sb.WriteString(" AUTH=")
 			sb.WriteString(encodeXtext(*opts.Auth))
 		}
@@ -783,13 +786,13 @@ func (c *Client) Mail(from string, opts *MailOptions) error {
 	}
 
 	if opts != nil && opts.XOORG != nil {
-		if _, ok := c.connExt["XOORG"]; ok {
+		if _, ok := c.session.ext["XOORG"]; ok {
 			sb.WriteString(" XOORG=")
 			sb.WriteString(encodeXtext(*opts.XOORG))
 		}
 		// We can safely discard parameter if server does not support AUTH.
 	}
-	if _, ok := c.connExt["DELIVERBY"]; ok && opts != nil && opts.DeliverBy != nil {
+	if _, ok := c.session.ext["DELIVERBY"]; ok && opts != nil && opts.DeliverBy != nil {
 		if opts.DeliverBy.Mode == deltasmtp.DeliverByReturn &&
 			(opts.DeliverBy.Seconds < 1 || opts.DeliverBy.Seconds > 999999999) {
 			return errors.New("smtp: DELIVERBY mode must be between 1 and 999999999 with return mode")
@@ -804,7 +807,7 @@ func (c *Client) Mail(from string, opts *MailOptions) error {
 		}
 		sb.WriteString(arg)
 	}
-	if _, ok := c.connExt["MT-PRIORITY"]; ok && opts != nil && opts.MTPriority != nil {
+	if _, ok := c.session.ext["MT-PRIORITY"]; ok && opts != nil && opts.MTPriority != nil {
 		if *opts.MTPriority < -9 || *opts.MTPriority > 9 {
 			return errors.New("smtp: MT-PRIORITY must be between -9 and 9")
 		}
@@ -838,12 +841,12 @@ func (c *Client) Rcpt(to string, opts *deltasmtp.RcptOptions) error {
 	sb.WriteString("RCPT TO:<")
 	sb.WriteString(to)
 	sb.WriteString(">")
-	if _, ok := c.connExt["DSN"]; ok && opts != nil {
-		if err := rcptDSN(&sb, opts, c.connExt); err != nil {
+	if _, ok := c.session.ext["DSN"]; ok && opts != nil {
+		if err := rcptDSN(&sb, opts, c.session.ext); err != nil {
 			return err
 		}
 	}
-	if _, ok := c.connExt["RRVS"]; ok && opts != nil && !opts.RequireRecipientValidSince.IsZero() {
+	if _, ok := c.session.ext["RRVS"]; ok && opts != nil && !opts.RequireRecipientValidSince.IsZero() {
 		sb.WriteString(" RRVS=")
 		sb.WriteString(opts.RequireRecipientValidSince.Format(time.RFC3339))
 	}
@@ -949,14 +952,14 @@ func (c *Client) DataResponse() (*ContentCloser, error) {
 //
 // If server returns an error, it will be of type *deltasmtp.
 func (c *Client) Bdat(size int) (*ContentCloser, error) {
-	if c.PipeliningActive() && c.connPipelining.pending > 0 {
+	if c.PipeliningActive() && c.session.pipelining.pending > 0 {
 		return nil, ErrPipeliningNoPendingRequired
 	}
 
 	if !c.cfg.chunking {
 		return nil, errors.New("smtp: chunking is disabled on the client")
 	}
-	if _, ok := c.connExt["CHUNKING"]; !ok {
+	if _, ok := c.session.ext["CHUNKING"]; !ok {
 		return nil, errors.New("smtp: server doesn't support chunking")
 	}
 
@@ -983,13 +986,13 @@ func (c *Client) Bdat(size int) (*ContentCloser, error) {
 // server specifies for the extension.
 func (c *Client) Extension(ext string) (bool, string) {
 	ext = strings.ToUpper(ext)
-	param, ok := c.connExt[ext]
+	param, ok := c.session.ext[ext]
 	return ok, param
 }
 
 // SupportsAuth checks whether an authentication mechanism is supported.
 func (c *Client) SupportsAuth(mech string) bool {
-	mechs, ok := c.connExt["AUTH"]
+	mechs, ok := c.session.ext["AUTH"]
 	if !ok {
 		return false
 	}
@@ -1006,7 +1009,7 @@ func (c *Client) SupportsAuth(mech string) bool {
 //
 // If the server doesn't convey this information, ok = false is returned.
 func (c *Client) MaxMessageSize() (size int, ok bool) {
-	v := c.connExt["SIZE"]
+	v := c.session.ext["SIZE"]
 	if v == "" {
 		return 0, false
 	}
@@ -1022,7 +1025,7 @@ func (c *Client) MaxMessageSize() (size int, ok bool) {
 //
 // If the server doesn't convey this information, ok = false is returned.
 func (c *Client) MaxTransactions() (n int, ok bool) {
-	return limit(c.connExt, "MAILMAX")
+	return limit(c.session.ext, "MAILMAX")
 }
 
 // MaxRecipients returns the maximum number of RCPT commands the server accepts
@@ -1030,7 +1033,7 @@ func (c *Client) MaxTransactions() (n int, ok bool) {
 //
 // If the server doesn't convey this information, ok = false is returned.
 func (c *Client) MaxRecipients() (n int, ok bool) {
-	return limit(c.connExt, "RCPTMAX")
+	return limit(c.session.ext, "RCPTMAX")
 }
 
 // Reset sends the RSET command to the server, aborting the current mail
@@ -1060,7 +1063,7 @@ func (c *Client) NoopResponse() error {
 // If pipelining is active and the command is send successful,
 // the connection is only closed after QuitResponse is called.
 func (c *Client) Quit() error {
-	if c.conn == nil {
+	if c.session.conn == nil {
 		return nil
 	}
 	if err := c.cmdValid(pipeliningTypeLast, 221, "QUIT"); err != nil {
@@ -1086,15 +1089,15 @@ func (c *Client) QuitResponse() error {
 
 // Connected returns the current server name.
 func (c *Client) Connected() bool {
-	return c.conn != nil
+	return c.session.conn != nil
 }
 
 // ServerAddress returns the current server address.
 func (c *Client) ServerAddress() string {
-	return c.connAddress
+	return c.session.address
 }
 
 // ServerName returns the current server name.
 func (c *Client) ServerName() string {
-	return c.connName
+	return c.session.name
 }

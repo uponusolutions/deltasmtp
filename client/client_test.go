@@ -67,7 +67,7 @@ func TestBasic(t *testing.T) {
 	fake := tester.NewFakeConn(server, cmdbuf)
 
 	c := &Client{
-		conn:     fake,
+		session:  session{conn: fake},
 		receiver: smtpreader.NewReceiver(fake, 4096, 0, 0),
 		sender:   smtpwriter.NewSender(fake, 4096),
 		cfg: Config{
@@ -724,7 +724,7 @@ func TestClientXtext(t *testing.T) {
 	c := New()
 	c.setConn(fake)
 
-	c.connExt = map[string]string{"AUTH": "PLAIN", "DSN": ""}
+	c.session.ext = map[string]string{"AUTH": "PLAIN", "DSN": ""}
 	email := "e=mc2@example.com"
 	require.Error(t, c.Mail(email, &MailOptions{Auth: &email}))
 	require.NoError(t, c.Rcpt(email, &deltasmtp.RcptOptions{
@@ -766,7 +766,7 @@ func TestClientDSN(t *testing.T) {
 	c := New()
 	c.setConn(fake)
 
-	c.connExt = map[string]string{"DSN": ""}
+	c.session.ext = map[string]string{"DSN": ""}
 	require.Error(t, c.Mail(dsnEmailRFC822, &MailOptions{
 		Return:     deltasmtp.DSNReturnHeaders,
 		EnvelopeID: dsnEnvelopeID,
@@ -781,7 +781,7 @@ func TestClientDSN(t *testing.T) {
 		OriginalRecipient:     dsnEmailUTF8,
 		Notify:                []deltasmtp.DSNNotify{deltasmtp.DSNNotifyFailure, deltasmtp.DSNNotifyDelayed},
 	}))
-	c.connExt["SMTPUTF8"] = ""
+	c.session.ext["SMTPUTF8"] = ""
 	require.NoError(t, c.Rcpt(dsnEmailUTF8, &deltasmtp.RcptOptions{
 		OriginalRecipientType: deltasmtp.DSNAddressTypeUTF8,
 		OriginalRecipient:     dsnEmailUTF8,
@@ -793,7 +793,7 @@ func TestClientDSN(t *testing.T) {
 }
 
 func (c *Client) Test() map[string]string {
-	return c.connExt
+	return c.session.ext
 }
 
 // A SASL initial response too large to inline within the 512-octet command-line
@@ -940,7 +940,7 @@ func TestClientDELIVERBY(t *testing.T) {
 	)
 	c := New()
 	c.setConn(fake)
-	c.connExt = map[string]string{"DELIVERBY": ""}
+	c.session.ext = map[string]string{"DELIVERBY": ""}
 	_ = c.Mail("root@nsa.gov", &MailOptions{
 		DeliverBy: &deltasmtp.DeliverByOptions{
 			Seconds: 100,
@@ -973,7 +973,7 @@ func TestClientMTPRIORITY(t *testing.T) {
 
 	c := New()
 	c.setConn(fake)
-	c.connExt = map[string]string{"MT-PRIORITY": ""}
+	c.session.ext = map[string]string{"MT-PRIORITY": ""}
 	priority := 6
 	_ = c.Mail("root@nsa.gov", &MailOptions{
 		MTPriority: &priority,
@@ -1032,13 +1032,54 @@ func TestClientDialClosesExisting(t *testing.T) {
 	addr := (&tester.FakeServer{}).Listen(t)
 	c := New()
 	require.NoError(t, c.Dial(context.Background(), addr))
-	first := c.conn
+	first := c.session.conn
 
 	// a failing dial must close the existing connection as well
 	require.Error(t, c.Dial(context.Background(), "127.0.0.1:0"))
 	require.False(t, c.Connected())
 	_, err := first.Write([]byte("NOOP\r\n"))
 	require.ErrorIs(t, err, net.ErrClosed)
+}
+
+// A failing dial must not report the server of a previous connection.
+func TestClientDialResetsServerInfo(t *testing.T) {
+	addr := (&tester.FakeServer{Extensions: []string{"PIPELINING"}}).Listen(t)
+	c := New()
+	require.NoError(t, c.Dial(context.Background(), addr))
+	require.Equal(t, addr, c.ServerAddress())
+	require.Equal(t, "fake", c.ServerName())
+	ok, _ := c.Extension("PIPELINING")
+	require.True(t, ok)
+
+	// kept after disconnect
+	require.NoError(t, c.Close())
+	require.Equal(t, addr, c.ServerAddress())
+	require.Equal(t, "fake", c.ServerName())
+
+	// the TCP dial fails
+	require.Error(t, c.Dial(context.Background(), "127.0.0.1:0"))
+	require.Empty(t, c.ServerAddress())
+	require.Empty(t, c.ServerName())
+	ok, _ = c.Extension("PIPELINING")
+	require.False(t, ok)
+
+	// the TCP dial succeeds, but the greeting is rejected
+	require.NoError(t, c.Dial(context.Background(), addr))
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = l.Close() })
+	go func() {
+		conn, err := l.Accept()
+		if err == nil {
+			_, _ = conn.Write([]byte("554 go away\r\n"))
+			_ = conn.Close()
+		}
+	}()
+	require.ErrorContains(t, c.Dial(context.Background(), l.Addr().String()), "go away")
+	require.Equal(t, l.Addr().String(), c.ServerAddress())
+	require.Empty(t, c.ServerName())
+	ok, _ = c.Extension("PIPELINING")
+	require.False(t, ok)
 }
 
 func TestClientMaxResponseLines(t *testing.T) {

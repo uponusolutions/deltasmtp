@@ -42,7 +42,7 @@ func (d *ContentCloser) Writer() io.Writer {
 
 // Write writes do underlying writer.
 func (d *ContentCloser) Write(p []byte) (n int, err error) {
-	if d.c.conn == nil {
+	if d.c.session.conn == nil {
 		return 0, ErrNotConnected
 	}
 	n, err = d.writer.Write(p)
@@ -62,7 +62,7 @@ func (d *ContentCloser) CloseWithResponse() (*deltasmtp.Status, error) {
 	d.closed = true
 
 	// e.g. closed after a malformed reply to a BDAT chunk
-	if d.c.conn == nil {
+	if d.c.session.conn == nil {
 		return nil, ErrNotConnected
 	}
 
@@ -100,7 +100,7 @@ func (d *ContentCloser) Close() error {
 // newContentCloser starts a transfer of the message content,
 // the deadline of the data timeout covers the whole transfer.
 func (c *Client) newContentCloser(writer io.WriteCloser) *ContentCloser {
-	deadline.Set(c.conn, c.cfg.dataTimeout)
+	deadline.Set(c.session.conn, c.cfg.dataTimeout)
 	c.deadline.Reset()
 	return &ContentCloser{c: c, writer: writer}
 }
