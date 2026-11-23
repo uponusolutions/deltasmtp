@@ -139,12 +139,13 @@ func TestMailer_FailedTransactionDoesNotBreakConnection(t *testing.T) {
 				_, failures, err := m.Send(t.Context(), tc.from, tc.rcpts, bytes.NewBufferString("Hello World!\r\n"))
 				if tc.wantErr != "" {
 					require.ErrorContains(t, err, tc.wantErr)
-				} else if !pc.pipelining {
-					// without pipelining DATA isn't sent at all
+				} else {
+					// with pipelining DATA is rejected, the recipient failures are the result
 					require.NoError(t, err)
 				}
 				if tc.name == "all recipients rejected" {
 					require.Len(t, failures, 1)
+					require.ErrorContains(t, failures[0].Error, "550")
 				}
 				assert.True(t, m.Connected(), "a rejected transaction must not close the connection")
 
@@ -189,4 +190,58 @@ func TestMailer_SourceStatusErrorClosesConnection(t *testing.T) {
 		[]string{"bob@external.com"}, bytes.NewBufferString("Hello World!\r\n"))
 	require.NoError(t, err)
 	assert.Equal(t, 2, connections(srv))
+}
+
+// TestMailer_AllRecipientsRefusedPipelined checks that with pipelining the refusal of
+// DATA without a recipient doesn't replace the recipient failures as error, and that
+// BDAT isn't sent at all.
+func TestMailer_AllRecipientsRefusedPipelined(t *testing.T) {
+	for _, chunking := range []bool{false, true} {
+		name := "data"
+		if chunking {
+			name = "bdat"
+		}
+		t.Run(name, func(t *testing.T) {
+			reply502 := func(fs *tester.FakeSession, _ string) bool {
+				fs.Reply("502 5.5.1 Missing RCPT TO command.")
+				return true
+			}
+			srv := &tester.FakeServer{
+				Extensions: []string{"PIPELINING"},
+				Handlers: map[string]tester.FakeHandler{
+					"RCPT": func(fs *tester.FakeSession, _ string) bool {
+						fs.Reply("451 4.7.1 try again later")
+						return true
+					},
+					"DATA": reply502,
+					"BDAT": reply502,
+				},
+			}
+			if chunking {
+				srv.Extensions = append(srv.Extensions, "CHUNKING")
+			}
+			addr := srv.Listen(t)
+
+			m := New(
+				WithServerAddresses(addr),
+				WithSecurity(SecurityPlain),
+				WithBasic(client.WithPipelining(true)),
+			)
+			t.Cleanup(func() { _ = m.Terminate() })
+
+			status, failures, err := m.Send(t.Context(), "alice@internal.com",
+				[]string{"bob@external.com", "carol@external.com"}, bytes.NewBufferString("Hello World!\r\n"))
+			require.NoError(t, err)
+			assert.Nil(t, status)
+			require.Len(t, failures, 2)
+			for _, f := range failures {
+				require.ErrorContains(t, f.Error, "451 4.7.1")
+			}
+			assert.True(t, m.Connected())
+
+			for _, c := range srv.Commands() {
+				assert.False(t, strings.HasPrefix(c, "BDAT"), "BDAT sent without a recipient")
+			}
+		})
+	}
 }

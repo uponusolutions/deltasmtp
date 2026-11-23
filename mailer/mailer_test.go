@@ -562,12 +562,8 @@ func TestClient_AllRejectedKeepsConnection(t *testing.T) {
 	_, failures, err := c.Send(t.Context(), "alice@internal.com",
 		[]string{"notfound1@external.com"}, bytes.NewBufferString("Hello World!"))
 
-	require.Equal(
-		t,
-		deltasmtp.ErrNoRecipients,
-		err,
-		"internal BDAT sizing error leaked to the caller",
-	)
+	// the rejection of DATA/BDAT without a recipient must not hide the recipient failures
+	require.NoError(t, err)
 	require.Len(t, failures, 1)
 	assert.True(t, c.Connected(), "connection must survive an all rejected transaction")
 }
@@ -581,12 +577,8 @@ func TestClient_AllRejectedChunkingKeepsConnection(t *testing.T) {
 	_, failures, err := c.Send(t.Context(), "alice@internal.com",
 		[]string{"notfound1@external.com"}, bytes.NewBufferString("Hello World!"))
 
-	require.Equal(
-		t,
-		deltasmtp.ErrNoRecipients,
-		err,
-		"internal BDAT sizing error leaked to the caller",
-	)
+	// the rejection of DATA/BDAT without a recipient must not hide the recipient failures
+	require.NoError(t, err)
 	require.Len(t, failures, 1)
 	assert.True(t, c.Connected(), "connection must survive an all rejected transaction")
 }

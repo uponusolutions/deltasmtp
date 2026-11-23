@@ -262,23 +262,37 @@ func (c *Mailer) handleResponses(pipelining *pipeliningPending, rcpts []string, 
 
 	if pipelining.data {
 		pipelining.data = false
-		w, err := c.client.ContentResponse(size)
-		if err != nil {
-			return nil, failures, err
-		}
-
-		// no rcpt was accepted - RFC 2920
-		// the client cannot assume that the DATA command will be rejected just because none of the RCPT TO commands worked.
-		if len(failures) == len(rcpts) {
-			if err := w.Close(); err != nil {
-				return nil, failures, err
-			}
-			return nil, failures, nil
-		}
-		return w, failures, nil
+		return c.contentResponse(len(failures) == len(rcpts), failures, size)
 	}
 
 	return nil, failures, nil
+}
+
+// contentResponse reads the response to the pipelined DATA (or sends BDAT).
+// If every recipient was rejected, a rejection of DATA, or of the empty message ending
+// the transaction, is expected and not returned: the recipient failures are the result.
+func (c *Mailer) contentResponse(allRejected bool, failures []resolve.Failure, size int) (*client.ContentCloser, []resolve.Failure, error) {
+	// With pipelining BDAT isn't sent yet, don't send it without a recipient.
+	if allRejected && c.client.ChunkingActive() {
+		return nil, failures, nil
+	}
+
+	w, err := c.client.ContentResponse(size)
+	if err == nil && allRejected {
+		// RFC 2920: the client cannot assume that the DATA command will be rejected
+		// just because none of the RCPT TO commands worked.
+		err = w.Close()
+	}
+	if err != nil {
+		if _, ok := err.(*deltasmtp.Status); ok && allRejected {
+			return nil, failures, nil
+		}
+		return nil, failures, err
+	}
+	if allRejected {
+		return nil, failures, nil
+	}
+	return w, failures, nil
 }
 
 // reset resets open mail transfer and is pipelining aware

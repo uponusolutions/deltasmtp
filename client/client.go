@@ -583,6 +583,13 @@ func (c *Client) PipeliningActive() bool {
 	return ok && c.cfg.pipelining && c.conn != nil
 }
 
+// ChunkingActive reports whether Content and ContentResponse use BDAT instead of DATA.
+// With pipelining active, Content doesn't send BDAT, ContentResponse does.
+func (c *Client) ChunkingActive() bool {
+	_, ok := c.connExt["CHUNKING"]
+	return ok && c.cfg.chunking
+}
+
 // Verify checks the validity of an email address on the server.
 // If Verify returns nil, the address is valid. A non-nil return
 // does not necessarily indicate an invalid address. Many servers
@@ -894,7 +901,7 @@ func rcptDSN(sb *strings.Builder, opts *deltasmtp.RcptOptions, ext map[string]st
 //
 // If server returns an error, it will be of type *deltasmtp.
 func (c *Client) Content(size int) (*ContentCloser, error) {
-	if _, ok := c.connExt["CHUNKING"]; c.cfg.chunking && ok {
+	if c.ChunkingActive() {
 		if c.PipeliningActive() {
 			return nil, nil
 		}
@@ -905,7 +912,7 @@ func (c *Client) Content(size int) (*ContentCloser, error) {
 
 // ContentResponse returns the result of previous send data command if pipelining is enabled
 func (c *Client) ContentResponse(size int) (*ContentCloser, error) {
-	if _, ok := c.connExt["CHUNKING"]; c.cfg.chunking && ok {
+	if c.ChunkingActive() {
 		return c.Bdat(size)
 	}
 	return c.DataResponse()
