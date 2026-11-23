@@ -69,18 +69,6 @@ const (
 	SecurityStartTLS Security = 3
 )
 
-// UTF8 describes how SMTPUTF8 is used.
-type UTF8 int32
-
-const (
-	// UTF8Prefer uses SMTPUTF8 if possible.
-	UTF8Prefer UTF8 = 0
-	// UTF8Force always uses SMTPUTF8.
-	UTF8Force UTF8 = 1
-	// UTF8Disabled never uses SMTPUTF8.
-	UTF8Disabled UTF8 = 2
-)
-
 // Config contains all configuration needed to configure a smtp client.
 type Config struct {
 	localName string // the name to use in HELO/EHLO/LHLO

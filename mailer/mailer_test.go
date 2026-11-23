@@ -643,7 +643,7 @@ func TestClient_SendMailUTF8Force(t *testing.T) {
 	_, _, err := c.SendAdvanced(
 		context.Background(),
 		from,
-		&client.MailOptions{UTF8: client.UTF8Force},
+		&client.MailOptions{SMTPUTF8: true},
 		recipients,
 		nil,
 		in,
@@ -693,7 +693,7 @@ func TestClient_VerifyUTF8Force(t *testing.T) {
 		assert.NoError(t, c.Disconnect())
 	}()
 
-	err := c.Verify("Bob@external.com", &client.VrfyOptions{UTF8: client.UTF8Force})
+	err := c.Verify("Bob@external.com", &client.VrfyOptions{SMTPUTF8: true})
 	require.ErrorContains(t, err, "server does not support SMTPUTF8")
 }
 

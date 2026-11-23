@@ -1522,3 +1522,29 @@ func TestGetChunkingBuffer(t *testing.T) {
 	require.GreaterOrEqual(t, cap(*b), 100)
 	require.GreaterOrEqual(t, len(*b), 100)
 }
+
+// TestMailVerifyUTF8 checks that SMTPUTF8 is only sent if requested.
+func TestMailVerifyUTF8(t *testing.T) {
+	server := "250 OK\r\n250 OK\r\n250 OK\r\n250 OK\r\n"
+	wrote := &bytes.Buffer{}
+	c := New()
+	c.setConn(tester.NewFakeConnStream(strings.NewReader(server), wrote))
+	c.session.ext = map[string]string{}
+
+	require.ErrorContains(t, c.Mail("a@example.org", &MailOptions{SMTPUTF8: true}), "server does not support SMTPUTF8")
+	require.ErrorContains(t, c.Verify("a@example.org", &VrfyOptions{SMTPUTF8: true}), "server does not support SMTPUTF8")
+
+	// Not sent unless requested.
+	c.session.ext["SMTPUTF8"] = ""
+	require.NoError(t, c.Mail("a@example.org", nil))
+	require.NoError(t, c.Verify("a@example.org", &VrfyOptions{}))
+
+	require.NoError(t, c.Mail("jösé@example.org", &MailOptions{SMTPUTF8: true}))
+	require.NoError(t, c.Verify("jösé@example.org", &VrfyOptions{SMTPUTF8: true}))
+	require.NoError(t, c.Close())
+
+	require.Equal(t, "MAIL FROM:<a@example.org>\r\n"+
+		"VRFY a@example.org\r\n"+
+		"MAIL FROM:<jösé@example.org> SMTPUTF8\r\n"+
+		"VRFY jösé@example.org SMTPUTF8\r\n", wrote.String())
+}

@@ -110,9 +110,9 @@ type MailOptions struct {
 	// with TLS.
 	RequireTLS bool
 
-	// The message envelope or message header contains UTF-8-encoded strings.
-	// This flag is set by SMTPUTF8-aware (RFC 6531) client.
-	UTF8 UTF8
+	// SMTPUTF8 sends the SMTPUTF8 parameter (RFC 6531), fails if the server
+	// doesn't support it.
+	SMTPUTF8 bool
 
 	// Value of RET= argument, FULL or HDRS.
 	Return deltasmtp.DSNReturn
@@ -141,9 +141,9 @@ type MailOptions struct {
 
 // VrfyOptions contains parameters for the VRFY command.
 type VrfyOptions struct {
-	// The message envelope or message header contains UTF-8-encoded strings.
-	// This flag is set by SMTPUTF8-aware (RFC 6531) client.
-	UTF8 UTF8
+	// SMTPUTF8 sends the SMTPUTF8 parameter (RFC 6531), fails if the server
+	// doesn't support it.
+	SMTPUTF8 bool
 }
 
 // Dial returns a connection to an SMTP server at addr. The addr must
@@ -611,13 +611,11 @@ func (c *Client) Verify(addr string, opts *VrfyOptions) error {
 	sb.WriteString("VRFY ")
 	sb.WriteString(addr)
 
-	// By default utf8 is preferred
-	if opts == nil || opts.UTF8 != UTF8Disabled {
-		if _, ok := c.session.ext["SMTPUTF8"]; ok {
-			sb.WriteString(" SMTPUTF8")
-		} else if opts != nil && opts.UTF8 == UTF8Force {
+	if opts != nil && opts.SMTPUTF8 {
+		if _, ok := c.session.ext["SMTPUTF8"]; !ok {
 			return errors.New("smtp: server does not support SMTPUTF8")
 		}
+		sb.WriteString(" SMTPUTF8")
 	}
 
 	return c.cmdValid(pipeliningTypeLast, 250, sb.String())
@@ -751,13 +749,11 @@ func (c *Client) Mail(from string, opts *MailOptions) error {
 		}
 		sb.WriteString(" REQUIRETLS")
 	}
-	// By default utf8 is preferred
-	if opts == nil || opts.UTF8 != UTF8Disabled {
-		if _, ok := c.session.ext["SMTPUTF8"]; ok {
-			sb.WriteString(" SMTPUTF8")
-		} else if opts != nil && opts.UTF8 == UTF8Force {
+	if opts != nil && opts.SMTPUTF8 {
+		if _, ok := c.session.ext["SMTPUTF8"]; !ok {
 			return errors.New("smtp: server does not support SMTPUTF8")
 		}
+		sb.WriteString(" SMTPUTF8")
 	}
 	if _, ok := c.session.ext["DSN"]; ok && opts != nil {
 		switch opts.Return {

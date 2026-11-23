@@ -11,6 +11,7 @@ import (
 
 	"github.com/uponusolutions/deltasmtp"
 	"github.com/uponusolutions/deltasmtp/client"
+	"github.com/uponusolutions/deltasmtp/internal/parse"
 	"github.com/uponusolutions/deltasmtp/resolve"
 )
 
@@ -18,6 +19,9 @@ import (
 type Mailer struct {
 	client *client.Client
 	cfg    additionalConfig
+
+	// mailOptions is reused to avoid an allocation per message.
+	mailOptions client.MailOptions
 }
 
 // New returns a new smtp client.
@@ -156,12 +160,6 @@ func (c *Mailer) prepare(
 	rcptsOptions []*deltasmtp.RcptOptions,
 	size int,
 ) (*client.ContentCloser, []resolve.Failure, error) {
-	if mailOptions == nil && size > 0 {
-		mailOptions = &client.MailOptions{
-			Size: int64(size),
-		}
-	}
-
 	pipelining := &pipeliningPending{}
 
 	// MAIL FROM:
@@ -358,7 +356,8 @@ func (c *Mailer) Send(ctx context.Context, from string, rcpt []string, in io.Rea
 // It will use an existing connection if possible or create a new one otherwise.
 //
 // The addresses in the rcpts parameter are the SMTP RCPT addresses.
-// If mailOptions isn't set, default values are used (e.g. size determined from in)
+// If mailOptions isn't set, the size is taken from in (if it has a Len method)
+// and SMTPUTF8 is used if the server supports it or an address needs it.
 // If rcptsOptions isn't set for some rcpts (e.g. len(rcpts) > len(rcptsOptions)),
 // default values are used for these recipients.
 //
@@ -392,6 +391,14 @@ func (c *Mailer) SendAdvanced(
 		if err = c.Connect(ctx); err != nil {
 			return nil, nil, err
 		}
+	}
+
+	if mailOptions == nil {
+		c.mailOptions = client.MailOptions{
+			Size:     int64(size),
+			SMTPUTF8: needsUTF8(from, rcpts) || c.supportsUTF8(),
+		}
+		mailOptions = &c.mailOptions
 	}
 
 	// From here on every failure has to end the transaction, otherwise the next
@@ -431,7 +438,12 @@ func (c *Mailer) SendAdvanced(
 // If Verify returns nil, the address is valid. A non-nil return
 // does not necessarily indicate an invalid address. Many servers
 // will not verify addresses for security reasons.
+//
+// If opts isn't set, SMTPUTF8 is used if the server supports it or addr needs it.
 func (c *Mailer) Verify(addr string, opts *client.VrfyOptions) error {
+	if opts == nil {
+		opts = &client.VrfyOptions{SMTPUTF8: !parse.IsASCII(addr) || c.supportsUTF8()}
+	}
 	err := c.client.Verify(addr, opts)
 	if !c.client.PipeliningActive() {
 		return err
@@ -589,4 +601,23 @@ func getCopyBuffer() *[]byte {
 	}
 	b := make([]byte, 32*1024)
 	return &b
+}
+
+// needsUTF8 reports whether an address requires SMTPUTF8 (RFC 6531).
+func needsUTF8(from string, rcpts []string) bool {
+	if !parse.IsASCII(from) {
+		return true
+	}
+	for _, rcpt := range rcpts {
+		if !parse.IsASCII(rcpt) {
+			return true
+		}
+	}
+	return false
+}
+
+// supportsUTF8 reports whether the server supports SMTPUTF8.
+func (c *Mailer) supportsUTF8() bool {
+	ok, _ := c.client.Extension("SMTPUTF8")
+	return ok
 }
