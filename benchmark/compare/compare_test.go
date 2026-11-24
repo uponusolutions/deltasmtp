@@ -219,7 +219,7 @@ func dialDeltaWith(addr string, chunking bool) (sender, error) {
 func (s deltaSender) send(body []byte) error {
 	// A reader with Len lets the mailer send the message as a single BDAT
 	// chunk, with DATA it makes no difference.
-	_, _, err := s.m.Send(context.Background(), from, rcpts, newReader(body))
+	_, err := s.m.Send(context.Background(), from, rcpts, func() io.Reader { return newReader(body) })
 	return err
 }
 

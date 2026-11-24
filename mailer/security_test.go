@@ -1,7 +1,6 @@
 package mailer
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -32,8 +31,8 @@ func TestSecurity_StartTLSRejectedNoPlaintextReuse(t *testing.T) {
 	c := New(WithServerAddresses(f.Listen(t)))
 
 	for range 2 {
-		msg := strings.NewReader("Subject: x\r\n\r\nsecret\r\n")
-		_, _, err := c.Send(t.Context(), "from@example.com", []string{"to@example.com"}, msg)
+		msg := "Subject: x\r\n\r\nsecret\r\n"
+		_, err := c.Send(t.Context(), "from@example.com", []string{"to@example.com"}, msg)
 		require.Error(t, err)
 		assert.False(t, c.Connected(), "plaintext connection must be closed")
 	}

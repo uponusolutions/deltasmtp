@@ -1,7 +1,6 @@
 package mailer
 
 import (
-	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -186,9 +185,7 @@ func TestClient_SendMailAutoconnect(t *testing.T) {
 	from := "alice@internal.com"
 	recipients := []string{"Bob@external.com", "mal@external.com"}
 
-	in := bytes.NewBuffer(data)
-
-	_, _, err := c.Send(context.Background(), from, recipients, in)
+	_, err := c.Send(context.Background(), from, recipients, data)
 	require.NoError(t, err)
 
 	// Lookup email.
@@ -221,9 +218,7 @@ func TestClient_SendMail(t *testing.T) {
 			from := "alice@internal.com"
 			recipients := []string{"Bob@external.com", "mal@external.com"}
 
-			in := bytes.NewBuffer(data)
-
-			_, _, err := c.Send(context.Background(), from, recipients, in)
+			_, err := c.Send(context.Background(), from, recipients, data)
 			require.NoError(t, err)
 
 			// Lookup email.
@@ -302,6 +297,7 @@ func TestClient_SendMailDirectManyRcptsPipelining(t *testing.T) {
 		data,
 		withTestServer(addr[2]),
 		WithBasic(client.WithPipelining(true)),
+		WithMaxRecipients(0),
 	)
 	require.NoError(t, err)
 
@@ -311,7 +307,7 @@ func TestClient_SendMailDirectManyRcptsPipelining(t *testing.T) {
 	require.Equal(t, recipients, m.Recipients)
 }
 
-func TestClient_SendMailDirectTooManyRcptsPipelining(t *testing.T) {
+func TestClient_SendMailRcptMaxSplitsTransactions(t *testing.T) {
 	for i, sa := range addr[:2] {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {
 			data := []byte("Hello World!")
@@ -332,17 +328,17 @@ func TestClient_SendMailDirectTooManyRcptsPipelining(t *testing.T) {
 				basic,
 			)
 			require.NoError(t, err)
-			require.Equal(t, 1, len(res.Responses))
-			require.Equal(t, 1000, len(res.Responses[0].Rcpts))
-			require.Equal(t, 1, len(res.Failures))
-			require.Equal(t,
-				deltasmtp.NewStatusS(452, deltasmtp.EnhancedCode{4, 5, 3}, "Maximum limit of 1000 recipients reached"),
-				res.Failures[0].Error,
-			)
-			require.Equal(t,
-				[]string{recipients[1000]},
-				res.Failures[0].Rcpts,
-			)
+			// RCPTMAX=1000 splits the recipients into two transactions.
+			require.Empty(t, res.Failures)
+			require.Len(t, res.Responses, 2)
+			assert.Equal(t, recipients[:1000], res.Responses[0].Rcpts)
+			assert.Equal(t, recipients[1000:], res.Responses[1].Rcpts)
+
+			be := testserver.GetBackend(s[i])
+			for _, rcpts := range [][]string{recipients[:1000], recipients[1000:]} {
+				_, found := be.Load(from, rcpts)
+				require.True(t, found)
+			}
 		})
 	}
 }
@@ -495,6 +491,7 @@ func TestClient_SendMailPartiallyRejectedManyRcpts(t *testing.T) {
 			"Hello World!",
 			withTestServer(addr[2]),
 			WithBasic(client.WithPipelining(true)),
+			WithMaxRecipients(0),
 		)
 		require.NoError(t, err)
 		return res, time.Since(start)
@@ -638,15 +635,13 @@ func TestClient_SendMailUTF8Force(t *testing.T) {
 	from := "alice@internal.com"
 	recipients := []string{"Bob@external.com", "mal@external.com"}
 
-	in := bytes.NewBuffer(data)
-
-	_, _, err := c.SendAdvanced(
+	_, err := c.SendAdvanced(
 		context.Background(),
 		from,
 		client.MailOptions{SMTPUTF8: true},
 		recipients,
 		nil,
-		in,
+		data,
 	)
 	require.ErrorContains(t, err, "server does not support SMTPUTF8")
 }
@@ -657,8 +652,9 @@ func TestClient_AllRejectedKeepsConnection(t *testing.T) {
 	require.NoError(t, c.Connect(t.Context()))
 	t.Cleanup(func() { _ = c.Terminate() })
 
-	_, failures, err := c.Send(t.Context(), "alice@internal.com",
-		[]string{"notfound1@external.com"}, bytes.NewBufferString("Hello World!"))
+	res, err := c.Send(t.Context(), "alice@internal.com",
+		[]string{"notfound1@external.com"}, "Hello World!")
+	_, failures := unpack(res)
 
 	// the rejection of DATA/BDAT without a recipient must not hide the recipient failures
 	require.NoError(t, err)
@@ -672,8 +668,9 @@ func TestClient_AllRejectedChunkingKeepsConnection(t *testing.T) {
 	require.NoError(t, c.Connect(t.Context()))
 	t.Cleanup(func() { _ = c.Terminate() })
 
-	_, failures, err := c.Send(t.Context(), "alice@internal.com",
-		[]string{"notfound1@external.com"}, bytes.NewBufferString("Hello World!"))
+	res, err := c.Send(t.Context(), "alice@internal.com",
+		[]string{"notfound1@external.com"}, "Hello World!")
+	_, failures := unpack(res)
 
 	// the rejection of DATA/BDAT without a recipient must not hide the recipient failures
 	require.NoError(t, err)
@@ -711,7 +708,7 @@ func TestClient_Send(t *testing.T) {
 	from := "alice1@internal.com"
 	recipients := []string{"Bob1@external.com", "mal1@external.com"}
 
-	_, _, err := c.Send(context.Background(), from, recipients, bytes.NewBuffer(data))
+	_, err := c.Send(context.Background(), from, recipients, data)
 	require.NoError(t, err)
 
 	// Lookup email.
@@ -746,7 +743,7 @@ func TestClient_SendMicrosoft(t *testing.T) {
 		assert.NoError(t, c.Disconnect())
 	}()
 
-	_, _, err = c.Send(context.Background(), from, recipients, bytes.NewBuffer([]byte(eml)))
+	_, err = c.Send(context.Background(), from, recipients, eml)
 	require.NoError(t, err)
 }
 
@@ -768,8 +765,8 @@ func TestSendAdvancedSize(t *testing.T) {
 
 	msg := "Subject: a\r\n\r\nbody\r\n"
 	send := func(opts client.MailOptions) {
-		_, _, err := c.SendAdvanced(t.Context(), "a@example.org", opts, []string{"b@example.org"}, nil,
-			bytes.NewBufferString(msg))
+		_, err := c.SendAdvanced(t.Context(), "a@example.org", opts, []string{"b@example.org"}, nil,
+			msg)
 		require.NoError(t, err)
 	}
 
@@ -779,4 +776,12 @@ func TestSendAdvancedSize(t *testing.T) {
 
 	send(client.MailOptions{Size: 99})
 	assert.Equal(t, int64(99), size.Load())
+}
+
+// unpack returns the status of the last response and the failures of res.
+func unpack(res Report) (*deltasmtp.Status, []resolve.Failure) {
+	if len(res.Responses) == 0 {
+		return nil, res.Failures
+	}
+	return res.Responses[len(res.Responses)-1].Status, res.Failures
 }

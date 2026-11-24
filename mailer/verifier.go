@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/uponusolutions/deltasmtp"
 	"github.com/uponusolutions/deltasmtp/client"
 	"github.com/uponusolutions/deltasmtp/resolve"
 )
@@ -27,19 +28,21 @@ var (
 	ErrVerifierEnded = errors.New("smtp: verifier ended")
 )
 
-// Verifier verifies recipients of a mail one by one on the connection of its Mailer.
+// Verifier verifies recipients one by one on the connection of its Mailer, which can't
+// send while the Verifier is active, from Mailer.Verifier to End.
 //
-// It is active from Mailer.Verifier to End, the first Verify sends MAIL FROM with VerifyRcpt.
-// The transaction stays open, so every recipient costs a single RCPT.
-// While it is active the Mailer can't send. An ended Verifier can't be used again.
+// With VerifyRcpt the transaction stays open, every recipient costs a single RCPT. A full
+// transaction (see SendAdvanced) is replaced by RSET and MAIL, on a new connection once
+// it used up its transactions.
 //
 // A rejection keeps the Verifier active, any other error closes the connection and ends it.
 type Verifier struct {
-	mailer *Mailer
-	mode   VerifyMode
-	from   string
-	begun  bool
-	ended  bool
+	mailer   *Mailer
+	mode     VerifyMode
+	from     string
+	begun    bool
+	ended    bool
+	accepted int // recipients accepted in the transaction
 }
 
 // Verifier returns an active Verifier checking recipients of a mail from from with mode.
@@ -48,9 +51,7 @@ func (c *Mailer) Verifier(mode VerifyMode, from string) (*Verifier, error) {
 	if c.verifying {
 		return nil, ErrVerifying
 	}
-
 	c.verifying = true
-
 	return &Verifier{mailer: c, mode: mode, from: from}, nil
 }
 
@@ -59,61 +60,79 @@ func (v *Verifier) Active() bool {
 	return !v.ended
 }
 
-// Verify checks whether the server accepts addr as recipient.
-// If Verify returns nil, the address is accepted. A rejection is returned as *deltasmtp.Status,
-// a refusal of the client matches client.ErrRefused.
-//
-// The first Verify connects if needed and with VerifyRcpt sends MAIL FROM, a failure ends the Verifier.
-// SMTPUTF8 is used if the server supports it, a server without it rejects non-ASCII addresses.
+// Verify returns nil if the server accepts addr as recipient. A rejection is a
+// *deltasmtp.Status, a refusal of the client matches client.ErrRefused. A failing
+// connect or MAIL, or a server not supporting the command (500, 502, 504), ends the
+// Verifier. SMTPUTF8 is used if the server supports it.
 func (v *Verifier) Verify(ctx context.Context, addr string) error {
 	if v.ended {
 		return ErrVerifierEnded
 	}
+	err := v.verify(ctx, addr)
+	// e.g. Postfix without RCPTMAX: learn the limit, check addr in a new transaction
+	if v.accepted > 0 && tooManyRcpts(err) {
+		v.mailer.cfg.maxRecipients = v.accepted
+		err = v.verify(ctx, addr)
+	}
+	return err
+}
 
-	if !v.begun {
+// verify checks addr, in a new transaction if the current one is full.
+func (v *Verifier) verify(ctx context.Context, addr string) error {
+	c := v.mailer
+	if limit := c.maxRecipients(); !v.begun || limit > 0 && v.accepted >= limit {
 		if err := v.begin(ctx); err != nil {
 			v.dispose()
 			return err
 		}
 	}
 
-	c := v.mailer
-
 	var err error
 	if v.mode == VerifyRcpt {
-		err = c.cmd(c.client.Rcpt(addr, nil), c.client.RcptResponse)
+		if err = c.cmd(c.client.Rcpt(addr, nil), c.client.RcptResponse); err == nil {
+			v.accepted++
+		}
 	} else {
 		err = c.cmd(c.client.Verify(addr, &client.VrfyOptions{SMTPUTF8: c.supportsUTF8()}), c.client.VerifyResponse)
 	}
-
-	if err != nil && !isRejection(err) {
+	if err != nil && (!isRejection(err) || unsupported(err)) {
 		v.dispose()
 	}
-
 	return c.closeUnlessRejected(err)
 }
 
-// begin connects if needed and with VerifyRcpt sends MAIL FROM.
-// A rejected MAIL FROM keeps the connection, any other error closes it.
+// unsupported reports whether err rejects the command itself, not the address: 500, 502
+// or 504 (RFC 5321 section 4.2.3), e.g. Postfix's "502 5.5.1 VRFY command is disabled".
+func unsupported(err error) bool {
+	st, ok := err.(*deltasmtp.Status)
+	return ok && (st.Code == 500 || st.Code == 502 || st.Code == 504)
+}
+
+// begin connects if needed and with VerifyRcpt ends the previous transaction and sends
+// MAIL. A rejected MAIL keeps the connection, any other error closes it.
 func (v *Verifier) begin(ctx context.Context) error {
 	c := v.mailer
-
-	// connect closes the connection on failure.
-	if !c.client.Connected() {
-		if err := c.connect(ctx); err != nil {
+	// A connection renewed by ready needs no RSET.
+	if v.begun && v.mode == VerifyRcpt && c.client.Connected() && !c.exhausted() {
+		if err := c.resetOrClose(); err != nil {
 			return err
 		}
 	}
+	if err := c.ready(ctx); err != nil {
+		return err
+	}
 
 	if v.mode == VerifyRcpt {
-		err := c.cmd(c.client.Mail(v.from, &client.MailOptions{SMTPUTF8: c.supportsUTF8()}), c.client.MailResponse)
-		if err != nil {
+		v.accepted = 0
+		switch err := c.mail(v.from, &client.MailOptions{SMTPUTF8: c.supportsUTF8()}, true); {
+		case err == errRenew:
+			return v.begin(ctx)
+		case err != nil:
 			return c.closeUnlessRejected(err)
 		}
 	}
 
 	v.begun = true
-
 	return nil
 }
 
@@ -123,18 +142,11 @@ func (v *Verifier) End() error {
 	if v.ended {
 		return nil
 	}
-
 	v.dispose()
-
 	if !v.begun || v.mode != VerifyRcpt {
 		return nil
 	}
-
-	if err := v.mailer.reset(); err != nil {
-		return errors.Join(err, v.mailer.client.Close())
-	}
-
-	return nil
+	return v.mailer.resetOrClose()
 }
 
 // dispose ends the Verifier without RSET and releases the Mailer.
@@ -143,12 +155,11 @@ func (v *Verifier) dispose() {
 	v.mailer.verifying = false
 }
 
-// closeUnlessRejected returns err and closes the connection, unless err is nil or a rejection.
+// closeUnlessRejected closes the connection unless err is nil or a rejection.
 func (c *Mailer) closeUnlessRejected(err error) error {
 	if err == nil || isRejection(err) {
 		return err
 	}
-
 	return errors.Join(err, c.client.Close())
 }
 
@@ -160,51 +171,28 @@ type VerifyReport struct {
 	Failures []resolve.Failure
 }
 
-// Verify checks with mode whether the servers of rcpts accept them as recipients of a mail from from.
-// See Send for the servers used, every server gets its own connection.
-func Verify(ctx context.Context, mode VerifyMode, from string, rcpts []string, opts ...Option) (VerifyReport, error) {
-	config := NewConfig(opts...)
-
-	mx, err := servers(ctx, rcpts, config)
-	if err != nil {
-		return VerifyReport{}, err
-	}
-
-	res := VerifyReport{Failures: mx.Failures}
-
-	for _, server := range mx.Servers {
-		accepted, failures := verify(ctx, server, from, mode, config)
-		res.Accepted = append(res.Accepted, accepted...)
-		res.Failures = append(res.Failures, failures...)
-	}
-
-	return res, nil
+// Verify checks with mode whether the servers of rcpts, see Send, accept them as recipients
+// of a mail from from.
+func Verify(ctx context.Context, mode VerifyMode, from string, rcpts []string, opts ...Option) (res VerifyReport, err error) {
+	unresolved, err := perServer(ctx, rcpts, opts, func(m *Mailer, rcpts []string) {
+		res.add(ctx, m, mode, from, rcpts)
+	})
+	res.Failures = append(unresolved, res.Failures...)
+	return res, err
 }
 
-// verify checks the recipients of server on a new connection.
-func verify(ctx context.Context, server resolve.Server, from string, mode VerifyMode, config Config) (accepted []string, failures []resolve.Failure) {
-	config.extra.serverAddresses = server.Addresses
-	m := NewFromConfig(config)
-	// QUIT ends the transaction as well, the Mailer isn't used afterwards.
-	defer func() { _ = m.Disconnect() }()
-
-	// A new Mailer has no active Verifier.
-	v, _ := m.Verifier(mode, from)
-
-	for i, rcpt := range server.Rcpts {
-		err := v.Verify(ctx, rcpt)
-		if err == nil {
-			accepted = append(accepted, rcpt)
-			continue
+// add adds the results of checking rcpts with a Verifier of the new Mailer m.
+func (r *VerifyReport) add(ctx context.Context, m *Mailer, mode VerifyMode, from string, rcpts []string) {
+	v, _ := m.Verifier(mode, from) // a new Mailer has no active Verifier
+	for i, rcpt := range rcpts {
+		switch err := v.Verify(ctx, rcpt); {
+		case err == nil:
+			r.Accepted = append(r.Accepted, rcpt)
+		case v.ended: // the remaining recipients can't be checked
+			r.Failures = append(r.Failures, resolve.Failure{Rcpts: rcpts[i:], Error: err})
+			return
+		default:
+			r.Failures = append(r.Failures, resolve.Failure{Rcpts: []string{rcpt}, Error: err})
 		}
-
-		// The sender was rejected or the connection is lost, the remaining recipients can't be checked.
-		if v.ended {
-			return accepted, append(failures, resolve.Failure{Rcpts: server.Rcpts[i:], Error: err})
-		}
-
-		failures = append(failures, resolve.Failure{Rcpts: []string{rcpt}, Error: err})
 	}
-
-	return accepted, failures
 }

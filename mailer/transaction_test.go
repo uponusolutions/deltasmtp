@@ -1,7 +1,7 @@
 package mailer
 
 import (
-	"bytes"
+	"io"
 	"strings"
 	"sync"
 	"testing"
@@ -136,7 +136,8 @@ func TestMailer_FailedTransactionDoesNotBreakConnection(t *testing.T) {
 				)
 				t.Cleanup(func() { _ = m.Terminate() })
 
-				_, failures, err := m.Send(t.Context(), tc.from, tc.rcpts, bytes.NewBufferString("Hello World!\r\n"))
+				res, err := m.Send(t.Context(), tc.from, tc.rcpts, "Hello World!\r\n")
+				_, failures := unpack(res)
 				if tc.wantErr != "" {
 					require.ErrorContains(t, err, tc.wantErr)
 				} else {
@@ -149,8 +150,9 @@ func TestMailer_FailedTransactionDoesNotBreakConnection(t *testing.T) {
 				}
 				assert.True(t, m.Connected(), "a rejected transaction must not close the connection")
 
-				status, failures, err := m.Send(t.Context(), "alice@internal.com",
-					[]string{"bob@external.com"}, bytes.NewBufferString("Hello World!\r\n"))
+				res, err = m.Send(t.Context(), "alice@internal.com",
+					[]string{"bob@external.com"}, "Hello World!\r\n")
+				status, failures := unpack(res)
 				require.NoError(t, err)
 				require.Empty(t, failures)
 				require.NotNil(t, status)
@@ -182,12 +184,12 @@ func TestMailer_SourceStatusErrorClosesConnection(t *testing.T) {
 	m := New(WithServerAddresses(addr), WithSecurity(SecurityPlain))
 	t.Cleanup(func() { _ = m.Terminate() })
 
-	_, _, err := m.Send(t.Context(), "alice@internal.com", []string{"bob@external.com"}, &statusReader{})
+	_, err := m.Send(t.Context(), "alice@internal.com", []string{"bob@external.com"}, func() io.Reader { return &statusReader{} })
 	require.ErrorIs(t, err, deltasmtp.ErrDataTooLarge)
 	assert.False(t, m.Connected())
 
-	_, _, err = m.Send(t.Context(), "alice@internal.com",
-		[]string{"bob@external.com"}, bytes.NewBufferString("Hello World!\r\n"))
+	_, err = m.Send(t.Context(), "alice@internal.com",
+		[]string{"bob@external.com"}, "Hello World!\r\n")
 	require.NoError(t, err)
 	assert.Equal(t, 2, connections(srv))
 }
@@ -229,8 +231,9 @@ func TestMailer_AllRecipientsRefusedPipelined(t *testing.T) {
 			)
 			t.Cleanup(func() { _ = m.Terminate() })
 
-			status, failures, err := m.Send(t.Context(), "alice@internal.com",
-				[]string{"bob@external.com", "carol@external.com"}, bytes.NewBufferString("Hello World!\r\n"))
+			res, err := m.Send(t.Context(), "alice@internal.com",
+				[]string{"bob@external.com", "carol@external.com"}, "Hello World!\r\n")
+			status, failures := unpack(res)
 			require.NoError(t, err)
 			assert.Nil(t, status)
 			require.Len(t, failures, 2)

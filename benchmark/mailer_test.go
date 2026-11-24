@@ -124,7 +124,7 @@ func newMailer(addr string, opts []client.Option) *mailer.Mailer {
 func sendMailCon(c *mailer.Mailer, in io.Reader) error {
 	from := "alice@internal.com"
 	recipients := []string{"bob@external.com", "tim@external.com"}
-	_, _, err := c.Send(context.Background(), from, recipients, in)
+	_, err := c.Send(context.Background(), from, recipients, func() io.Reader { return in })
 	return err
 }
 

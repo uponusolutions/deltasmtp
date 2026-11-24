@@ -1,7 +1,6 @@
 package mailer
 
 import (
-	"bytes"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -34,15 +33,17 @@ func TestMailer_RefusedRcpt(t *testing.T) {
 			m := New(opts...)
 			t.Cleanup(func() { _ = m.Terminate() })
 
-			status, failures, err := m.Send(t.Context(), "alice@internal.com", refusedRcpts,
-				bytes.NewBufferString("Hello World!\r\n"))
+			res, err := m.Send(t.Context(), "alice@internal.com", refusedRcpts,
+				"Hello World!\r\n")
+			status, failures := unpack(res)
 			require.NoError(t, err)
 			require.NotNil(t, status)
 			requireRefusedFailures(t, failures)
 
 			// every recipient refused
-			status, failures, err = m.Send(t.Context(), "alice@internal.com", refusedRcpts[1:2],
-				bytes.NewBufferString("Hello World!\r\n"))
+			res, err = m.Send(t.Context(), "alice@internal.com", refusedRcpts[1:2],
+				"Hello World!\r\n")
+			status, failures = unpack(res)
 			require.NoError(t, err)
 			assert.Nil(t, status)
 			require.Len(t, failures, 1)
@@ -62,12 +63,13 @@ func TestMailer_RefusedMail(t *testing.T) {
 			m := New(opts...)
 			t.Cleanup(func() { _ = m.Terminate() })
 
-			_, _, err := m.SendAdvanced(t.Context(), "alice@internal.com", client.MailOptions{RequireTLS: true},
-				[]string{"bob@external.com"}, nil, bytes.NewBufferString("Hello World!\r\n"))
+			_, err := m.SendAdvanced(t.Context(), "alice@internal.com", client.MailOptions{RequireTLS: true},
+				[]string{"bob@external.com"}, nil, "Hello World!\r\n")
 			require.ErrorIs(t, err, client.ErrRefused)
 
-			_, failures, err := m.Send(t.Context(), "alice@internal.com", []string{"bob@external.com"},
-				bytes.NewBufferString("Hello World!\r\n"))
+			res, err := m.Send(t.Context(), "alice@internal.com", []string{"bob@external.com"},
+				"Hello World!\r\n")
+			_, failures := unpack(res)
 			require.NoError(t, err)
 			require.Empty(t, failures)
 			assert.Equal(t, 1, connections(srv))

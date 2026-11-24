@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"strings"
 
 	"github.com/uponusolutions/deltasmtp/mailer"
 	"github.com/uponusolutions/deltasmtp/tester/testserver"
@@ -54,16 +53,19 @@ func run(ctx context.Context) error {
 	for i := range 2 {
 		msg := fmt.Sprintf("From: %s\r\nSubject: Mail %d\r\n\r\nHello!\r\n", from, i+1)
 
-		status, failures, err := m.Send(ctx, from, to, strings.NewReader(msg))
+		report, err := m.Send(ctx, from, to, msg)
 		if err != nil {
 			return fmt.Errorf("send: %w", err)
 		}
 
-		for _, f := range failures {
+		for _, f := range report.Failures {
 			fmt.Printf("rejected %v: %v\n", f.Rcpts, f.Error)
 		}
 
-		fmt.Printf("mail %d: %d %s\n", i+1, status.Code, status.Text())
+		// A response per transaction, the server may limit the recipients of one.
+		for _, r := range report.Responses {
+			fmt.Printf("mail %d to %v: %d %s\n", i+1, r.Rcpts, r.Status.Code, r.Status.Text())
+		}
 	}
 
 	// Look the last mail up in the server.

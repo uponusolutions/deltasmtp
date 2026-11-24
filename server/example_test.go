@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"strings"
 
 	"github.com/uponusolutions/deltasmtp/client"
 	"github.com/uponusolutions/deltasmtp/mailer"
@@ -53,7 +52,7 @@ func ExampleDial() {
 // unnecessary noise there.
 var (
 	from       = "gopher@example.net"
-	msg        = strings.NewReader("dummy message")
+	msg        = "dummy message"
 	recipients = []string{"foo@example.com"}
 )
 
@@ -68,7 +67,7 @@ func Example_plainAuth() {
 		mailer.WithSASLClient(auth),
 	)
 
-	_, _, err := c.Send(context.Background(), from, recipients, msg)
+	_, err := c.Send(context.Background(), from, recipients, msg)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -81,7 +80,7 @@ func Example() {
 	// Connect to the server, upgrade to TLS via STARTTLS, authenticate,
 	// set the sender and recipient, and send the email all in one step.
 	to := []string{"recipient@example.net"}
-	msg := strings.NewReader("To: recipient@example.net\r\n" +
+	msg := ("To: recipient@example.net\r\n" +
 		"Subject: discount Gophers!\r\n" +
 		"\r\n" +
 		"This is the email body.\r\n")
@@ -91,7 +90,7 @@ func Example() {
 		mailer.WithSASLClient(auth),
 	)
 
-	_, _, err := c.Send(context.Background(), "sender@example.org", to, msg)
+	_, err := c.Send(context.Background(), "sender@example.org", to, msg)
 	if err != nil {
 		log.Fatal(err)
 	}

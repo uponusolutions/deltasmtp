@@ -256,10 +256,11 @@ func (c *Client) Close() (err error) {
 //
 // Any error other than an *deltasmtp.Status reply (e.g. a malformed or too long reply,
 // a timeout) may leave the rest of the reply unread. The next command would read
-// it as its own reply, so the connection is closed.
+// it as its own reply, so the connection is closed. So it is after a 421 reply, the
+// server closes the connection (RFC 5321 section 3.8).
 func (c *Client) receiveResponse() (*deltasmtp.Status, error) {
 	status, err := c.receiver.ReadResponse()
-	if err != nil {
+	if err != nil || status.Code == 421 {
 		_ = c.Close()
 	}
 	return status, err
@@ -268,8 +269,15 @@ func (c *Client) receiveResponse() (*deltasmtp.Status, error) {
 // receiveResponseValid reads a reply and returns it as error if the code isn't expected.
 // The connection is closed like in receiveResponse.
 func (c *Client) receiveResponseValid(expectCode int) error {
+	if !smtpreader.IsCodeUnexpected(421, expectCode) { // the fast path wouldn't tell a 421
+		status, err := c.receiveResponse()
+		if err == nil && smtpreader.IsCodeUnexpected(status.Code, expectCode) {
+			return status
+		}
+		return err
+	}
 	err := c.receiver.ReadResponseValid(expectCode)
-	if _, ok := err.(*deltasmtp.Status); err != nil && !ok {
+	if st, ok := err.(*deltasmtp.Status); err != nil && (!ok || st.Code == 421) {
 		_ = c.Close()
 	}
 	return err
@@ -472,26 +480,28 @@ func (c *Client) Conclude() error {
 }
 
 func (c *Client) readResponseValid(expectCode int) error {
-	if c.session.conn == nil {
-		return ErrNotConnected
-	}
-
-	if err := c.consumeResponse(); err != nil {
+	if err := c.awaitResponse(); err != nil {
 		return err
 	}
-
-	c.deadline.Set(c.session.conn, c.cfg.commandTimeout)
-
-	// Make sure everything is flushed, probably already done if group has ended.
-	if err := c.sender.Flush(); err != nil {
-		return err
-	}
-
 	return c.receiveResponseValid(expectCode)
 }
 
-// ClearResponses consumes x pending responses from pipelining
-// 0 means to clear all pending requests, -1 all except 1
+// awaitResponse consumes a pending response and flushes the commands before reading it.
+func (c *Client) awaitResponse() error {
+	if c.session.conn == nil {
+		return ErrNotConnected
+	}
+	if err := c.consumeResponse(); err != nil {
+		return err
+	}
+	c.deadline.Set(c.session.conn, c.cfg.commandTimeout)
+	// Probably already flushed if the group has ended.
+	return c.sender.Flush()
+}
+
+// ClearResponses consumes x pending responses from pipelining, 0 means all, -1 all
+// except 1. A 421 reply is returned without reading further, the connection is closed
+// (e.g. Postfix after too many errors).
 func (c *Client) ClearResponses(x int) error {
 	if !c.PipeliningActive() {
 		return ErrPipeliningNotEnabled
@@ -502,8 +512,15 @@ func (c *Client) ClearResponses(x int) error {
 	}
 
 	for range x {
-		if err := c.readResponseValid(0); err != nil {
+		if err := c.awaitResponse(); err != nil {
 			return err
+		}
+		status, err := c.receiveResponse()
+		if err != nil {
+			return err
+		}
+		if status.Code == 421 {
+			return status
 		}
 	}
 	return nil

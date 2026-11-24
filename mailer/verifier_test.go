@@ -1,13 +1,15 @@
 package mailer
 
 import (
-	"bytes"
+	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/uponusolutions/deltasmtp/client"
+	"github.com/uponusolutions/deltasmtp/server"
 	"github.com/uponusolutions/deltasmtp/tester"
 )
 
@@ -104,8 +106,9 @@ func TestVerifier(t *testing.T) {
 				require.NoError(t, err)
 				require.NoError(t, v.End())
 
-				_, failures, err := m.Send(ctx, "alice@internal.com",
-					[]string{"bob@external.com"}, bytes.NewBufferString("Hello World!\r\n"))
+				res, err := m.Send(ctx, "alice@internal.com",
+					[]string{"bob@external.com"}, "Hello World!\r\n")
+				_, failures := unpack(res)
 				require.NoError(t, err)
 				require.Empty(t, failures)
 
@@ -127,7 +130,7 @@ func TestVerifier_HoldsMailer(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, v.Verify(t.Context(), "bob@external.com"))
 
-	_, _, err = m.Send(t.Context(), "alice@internal.com", []string{"bob@external.com"}, bytes.NewBufferString("Hi\r\n"))
+	_, err = m.Send(t.Context(), "alice@internal.com", []string{"bob@external.com"}, "Hi\r\n")
 	require.ErrorIs(t, err, ErrVerifying)
 	_, err = m.Verifier(VerifyRcpt, "alice@internal.com")
 	require.ErrorIs(t, err, ErrVerifying)
@@ -137,7 +140,7 @@ func TestVerifier_HoldsMailer(t *testing.T) {
 	require.NoError(t, v.End())
 	require.NoError(t, m.Connect(t.Context()))
 
-	_, _, err = m.Send(t.Context(), "alice@internal.com", []string{"bob@external.com"}, bytes.NewBufferString("Hi\r\n"))
+	_, err = m.Send(t.Context(), "alice@internal.com", []string{"bob@external.com"}, "Hi\r\n")
 	require.NoError(t, err)
 }
 
@@ -195,8 +198,9 @@ func TestVerifier_RejectedSender(t *testing.T) {
 			require.ErrorIs(t, v.Verify(t.Context(), "bob@external.com"), client.ErrRefused)
 			assert.False(t, v.Active())
 
-			_, failures, err := m.Send(t.Context(), "alice@internal.com", []string{"bob@external.com"},
-				bytes.NewBufferString("Hello World!\r\n"))
+			res, err := m.Send(t.Context(), "alice@internal.com", []string{"bob@external.com"},
+				"Hello World!\r\n")
+			_, failures := unpack(res)
 			require.NoError(t, err)
 			require.Empty(t, failures)
 			assert.Equal(t, 1, connections(srv))
@@ -227,6 +231,43 @@ func TestVerify(t *testing.T) {
 			assert.Equal(t, []string{"bob@external.com"}, res.Accepted)
 			require.Len(t, res.Failures, 1)
 			assert.Equal(t, "QUIT", srv.Commands()[len(srv.Commands())-1])
+		}
+	}
+}
+
+// TestVerifier_MaxRecipients checks that a transaction gets at most as many accepted
+// recipients as the server allows, rejected ones don't count: advertised by RCPTMAX,
+// or learned from a rejection for too many recipients (Postfix) and checked again.
+func TestVerifier_MaxRecipients(t *testing.T) {
+	rcpts := []string{"a@x.org", "notfound1@x.org", "b@x.org", "c@x.org", "notfound2@x.org", "d@x.org", "e@x.org"}
+	accepted := []string{"a@x.org", "b@x.org", "c@x.org", "d@x.org", "e@x.org"}
+
+	for _, postfix := range []bool{false, true} {
+		for _, pipelining := range []bool{false, true} {
+			t.Run(fmt.Sprintf("postfix=%v/pipelining=%v", postfix, pipelining), func(t *testing.T) {
+				var mails, sent atomic.Int32
+				be := postfixBackend(&mails, &sent)
+				opts := []server.Option{server.WithMaxRecipients(0)}
+				if !postfix {
+					be.Rcpt = backend.Rcpt
+					opts = []server.Option{server.WithMaxRecipients(2)}
+				}
+				addr := startServer(t, be, opts...)
+
+				res, err := Verify(t.Context(), VerifyRcpt, "alice@internal.com", rcpts,
+					withTestServer(addr), WithMaxRecipients(0), WithBasic(client.WithPipelining(pipelining)))
+				require.NoError(t, err)
+				assert.Equal(t, accepted, res.Accepted)
+				require.Len(t, res.Failures, 2)
+				for _, f := range res.Failures {
+					assert.ErrorContains(t, f.Error, "550")
+				}
+				assert.EqualValues(t, 3, mails.Load())
+				if postfix {
+					// c is rejected once, then the learned limit isn't exceeded.
+					assert.EqualValues(t, len(rcpts)+1, sent.Load())
+				}
+			})
 		}
 	}
 }

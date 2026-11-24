@@ -14,6 +14,12 @@ func DefaultConfig() Config {
 			// Mandatory STARTTLS (RFC 3207) with certificate verification, so
 			// mail and credentials are never sent unencrypted by default.
 			security: SecurityStartTLS,
+			// The minimum a server must accept per transaction (RFC 5321 section
+			// 4.5.3.1.8), used if it doesn't advertise RCPTMAX (RFC 9422).
+			maxRecipients: 100,
+			// Exim's default for smtp_accept_max_per_connection, used if the
+			// server doesn't advertise MAILMAX (RFC 9422).
+			maxTransactions: 1000,
 		},
 		client: client.DefaultConfig(),
 	}
@@ -68,6 +74,8 @@ type additionalConfig struct {
 	saslClient         sasl.Client // support authentication
 	security           Security    // Defines the connection is secured
 	tlsConfig          *tls.Config
+	maxRecipients      int // per transaction, if the server doesn't advertise RCPTMAX
+	maxTransactions    int // per connection, if the server doesn't advertise MAILMAX
 }
 
 // Config contains a client config and the mailer config additions.
@@ -133,5 +141,24 @@ func WithSecurity(security Security) Option {
 func WithTLSConfig(cfg *tls.Config) Option {
 	return func(c *Config) {
 		c.extra.tlsConfig = cfg
+	}
+}
+
+// WithMaxRecipients sets the accepted recipients per transaction if the server doesn't
+// advertise RFC 9422 RCPTMAX, see Mailer.SendAdvanced. Defaults to 100, the minimum a
+// server must accept (RFC 5321 section 4.5.3.1.8). Zero (or a negative value) disables
+// the limit. A rejection for too many recipients lowers it to the accepted ones.
+func WithMaxRecipients(maxRecipients int) Option {
+	return func(c *Config) {
+		c.extra.maxRecipients = maxRecipients
+	}
+}
+
+// WithMaxTransactions sets the MAIL commands per connection if the server doesn't
+// advertise RFC 9422 MAILMAX, the next transaction gets a new connection. Defaults to
+// 1000, Exim's default. Zero (or a negative value) disables the limit.
+func WithMaxTransactions(maxTransactions int) Option {
+	return func(c *Config) {
+		c.extra.maxTransactions = maxTransactions
 	}
 }

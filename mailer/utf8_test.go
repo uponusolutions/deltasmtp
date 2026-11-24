@@ -2,7 +2,6 @@ package mailer
 
 import (
 	"context"
-	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -52,8 +51,9 @@ func TestSendAutoUTF8(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, failures, err := c.SendAdvanced(t.Context(), tt.from, client.MailOptions{}, []string{tt.rcpt}, nil,
-				strings.NewReader("Subject: äöü\r\n\r\nbody\r\n"))
+			res, err := c.SendAdvanced(t.Context(), tt.from, client.MailOptions{}, []string{tt.rcpt}, nil,
+				"Subject: äöü\r\n\r\nbody\r\n")
+			_, failures := unpack(res)
 			require.NoError(t, err)
 			require.Empty(t, failures)
 			assert.True(t, utf8.Load())
@@ -69,15 +69,17 @@ func TestSendUTF8Unsupported(t *testing.T) {
 
 	msg := "Subject: a\r\n\r\nbody\r\n"
 
-	_, failures, err := c.Send(t.Context(), "alice@internal.com", []string{"bob@external.com"}, strings.NewReader(msg))
+	res, err := c.Send(t.Context(), "alice@internal.com", []string{"bob@external.com"}, msg)
+	_, failures := unpack(res)
 	require.NoError(t, err)
 	require.Empty(t, failures)
 
-	_, _, err = c.Send(t.Context(), "jösé@internal.com", []string{"bob@external.com"}, strings.NewReader(msg))
+	_, err = c.Send(t.Context(), "jösé@internal.com", []string{"bob@external.com"}, msg)
 	require.ErrorContains(t, err, "550 5.6.7")
 
-	_, failures, err = c.Send(t.Context(), "alice@internal.com",
-		[]string{"bob@external.com", "jösé@external.com"}, strings.NewReader(msg))
+	res, err = c.Send(t.Context(), "alice@internal.com",
+		[]string{"bob@external.com", "jösé@external.com"}, msg)
+	_, failures = unpack(res)
 	require.NoError(t, err)
 	require.Len(t, failures, 1)
 	assert.Equal(t, []string{"jösé@external.com"}, failures[0].Rcpts)

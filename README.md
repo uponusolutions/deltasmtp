@@ -101,8 +101,8 @@ accepted. Recipients without an MX record are failures as well, `err` is only
 set if the MX lookup failed temporarily, e.g. the DNS server didn't respond.
 
 For a message that shouldn't be held in memory, pass a function that opens it.
-It is called once per server, the reader is closed after the transaction and
-an error fails the recipients of that server:
+It is called once per transaction, the reader is closed after it and an error
+fails the remaining recipients:
 
 ```go
 report, err := mailer.Send(ctx, from, rcpts, func() (io.ReadCloser, error) {
@@ -126,11 +126,20 @@ m := mailer.New(
 )
 defer func() { _ = m.Disconnect() }()
 
-status, failures, err := m.Send(ctx, from, rcpts, strings.NewReader(eml))
+report, err := m.Send(ctx, from, rcpts, eml)
 ```
 
-A `Mailer` sends to one server, so its `Send` reads the message once from an
-`io.Reader`, which can also stream it from a file or a pipe.
+A `Mailer` sends to one server and takes the same message types as
+`mailer.Send`. If the server limits the recipients per transaction (RFC 9422
+RCPTMAX), the remaining recipients are sent in further transactions, rejected
+recipients don't count against the limit. Servers that don't advertise it (e.g.
+Postfix) get at most 100 recipients per transaction (`WithMaxRecipients`), and a
+recipient rejected with `452` for too many recipients is sent in the next
+transaction. The report has a response per transaction, each reads the message
+again. Once the connection has as many transactions as the server allows
+(RFC 9422 MAILMAX, otherwise 1000, `WithMaxTransactions`), it is replaced by a
+new one, as it is if the server rejects `MAIL` with `421` after earlier
+transactions.
 
 By default the mailer requires STARTTLS and verifies the server certificate
 (`SecurityStartTLS`), so mail and credentials are never sent unencrypted.
@@ -222,7 +231,7 @@ it.
 | RRVS | [7293](https://tools.ietf.org/html/rfc7293) | yes | opt-in |
 | DELIVERBY | [2852](https://tools.ietf.org/html/rfc2852) | yes | opt-in |
 | MT-PRIORITY | [6710](https://tools.ietf.org/html/rfc6710) | yes | opt-in |
-| LIMITS (MAILMAX, RCPTMAX) | [9422](https://tools.ietf.org/html/rfc9422) | parsed | with max transactions / recipients |
+| LIMITS (MAILMAX, RCPTMAX) | [9422](https://tools.ietf.org/html/rfc9422) | parsed, respected by the mailer | with max transactions / recipients |
 | XOORG | non-standard | yes | opt-in |
 
 Server-side extensions marked opt-in are advertised only when enabled, because

@@ -3,28 +3,23 @@
 package mailer
 
 import (
-	"bytes"
-	"cmp"
 	"context"
 	"errors"
-	"fmt"
-	"io"
 	"net"
-	"strings"
-	"sync"
 
 	"github.com/uponusolutions/deltasmtp"
 	"github.com/uponusolutions/deltasmtp/client"
-	"github.com/uponusolutions/deltasmtp/resolve"
 )
 
-// Mailer implements a smtp client with .
+// Mailer implements a smtp client sending mail to a server.
 type Mailer struct {
 	client *client.Client
 	cfg    additionalConfig
 
 	// verifying is set while a Verifier holds the connection.
 	verifying bool
+	// transactions counts the MAIL commands sent on the connection (RFC 9422 MAILMAX).
+	transactions int
 }
 
 // New returns a new smtp client.
@@ -34,13 +29,7 @@ type Mailer struct {
 // certificate is verified, so nothing is sent unencrypted. Use WithSecurity
 // to choose a different mode.
 func New(opts ...Option) *Mailer {
-	cfg := DefaultConfig()
-
-	for _, o := range opts {
-		o(&cfg)
-	}
-
-	return NewFromConfig(cfg)
+	return NewFromConfig(NewConfig(opts...))
 }
 
 // NewFromConfig returns a new smtp client from existing config.
@@ -56,93 +45,66 @@ func (c *Mailer) Client() *client.Client {
 	return c.client
 }
 
-// Connect connects to one of the available smtp server.
-// When server supports auth and clients SaslClient is set, auth is called.
-// Security is enforced like configured (Plain, TLS, StartTLS or PreferStartTLS)
-// If an error occures, the connection is closed if open.
-// It fails with ErrVerifying while a Verifier of c is active, a new connection would lose its transaction.
+// Connect connects to one of the server addresses, secured as configured (see
+// WithSecurity) and authenticated if a SASL client is set and the server supports AUTH.
+// On an error the connection is closed. It fails with ErrVerifying while a Verifier of
+// c is active, a new connection would lose its transaction.
 func (c *Mailer) Connect(ctx context.Context) error {
 	if c.verifying {
 		return ErrVerifying
 	}
-
 	return c.connect(ctx)
 }
 
-// connect connects to one of the available smtp server, see Connect.
-func (c *Mailer) connect(ctx context.Context) error {
-	var err error
-
+func (c *Mailer) connect(ctx context.Context) (err error) {
 	for _, addrs := range c.cfg.serverAddresses {
 		for p := range addrs {
-			// start at c.cfg.serverAddressIndex
-			err = c.connectAddress(ctx, addrs[(p+c.cfg.serverAddressIndex)%len(addrs)])
-			if err == nil {
+			if err = c.connectAddress(ctx, addrs[(p+c.cfg.serverAddressIndex)%len(addrs)]); err == nil {
 				return nil
 			}
 		}
 	}
-
 	return err
 }
 
-// Connect connects to the SMTP server (addr).
-// When server supports auth and clients SaslClient is set, auth is called.
-// Security is enforced like configured (Plain, TLS, StartTLS or PreferStartTLS)
-// If an error occures, the connection is closed if open.
 func (c *Mailer) connectAddress(ctx context.Context, addr string) (err error) {
-	switch c.cfg.security {
-	case SecurityTLS:
+	c.transactions = 0
+	sec := c.cfg.security
+	if sec == SecurityTLS {
 		err = c.client.DialTLS(ctx, c.cfg.tlsConfig, addr)
-	case SecurityPlain, SecurityStartTLS, SecurityPreferStartTLS:
-		fallthrough
-	default:
+	} else {
 		err = c.client.Dial(ctx, addr)
 	}
-
-	// Dial and DialTLS close the connection on error.
 	if err != nil {
-		return err
+		return err // closed by Dial
 	}
 
-	// Never leave a connection open that didn't complete the configured
-	// security and auth sequence, otherwise a later Send would reuse it.
+	// A connection without the configured security and auth mustn't be reused.
 	defer func() {
 		if err != nil {
 			_ = c.client.Close()
 		}
 	}()
 
-	if c.cfg.security == SecurityStartTLS || c.cfg.security == SecurityPreferStartTLS {
-		if ok, _ := c.client.Extension("STARTTLS"); !ok {
-			if c.cfg.security == SecurityStartTLS {
-				_ = c.Disconnect()
-				return errors.New("smtp: server doesn't support STARTTLS")
-			}
-		} else {
+	if sec == SecurityStartTLS || sec == SecurityPreferStartTLS {
+		if ok, _ := c.client.Extension("STARTTLS"); ok {
 			serverName, _, _ := net.SplitHostPort(addr)
-
-			err = c.client.StartTLS(c.cfg.tlsConfig, serverName)
-			if err != nil {
-				if c.cfg.security != SecurityPreferStartTLS {
+			if err = c.client.StartTLS(c.cfg.tlsConfig, serverName); err != nil {
+				if sec != SecurityPreferStartTLS {
 					return err
 				}
-				// recover from failure if prefer start tls --- switch to plain
-				err = c.client.Dial(ctx, addr)
-				if err != nil {
+				if err = c.client.Dial(ctx, addr); err != nil { // fall back to plain
 					return err
 				}
 			}
+		} else if sec == SecurityStartTLS {
+			_ = c.Disconnect()
+			return errors.New("smtp: server doesn't support STARTTLS")
 		}
 	}
 
-	return c.auth()
-}
-
-func (c *Mailer) auth() error {
-	// Authenticate if authentication is possible and sasl client available.
 	if ok, _ := c.client.Extension("AUTH"); ok && c.cfg.saslClient != nil {
-		if err := c.client.Auth(c.cfg.saslClient); err != nil {
+		if err = c.client.Auth(c.cfg.saslClient); err != nil {
 			_ = c.Disconnect()
 			return err
 		}
@@ -150,323 +112,17 @@ func (c *Mailer) auth() error {
 	return nil
 }
 
-// Len defines the Len method existing in some structs to get the length of the internal []byte (e.g. bytes.Buffer)
-type Len interface {
-	Len() int
-}
-
-type pipeliningPending struct {
-	mail        bool
-	rcpts       int
-	rcptsOffset int
-	data        bool
-}
-
-// On an error the transaction may still be open, the caller has to end it (see abort).
-// A nil writer without an error means every recipient was rejected, the transaction
-// is still open as well.
-func (c *Mailer) prepare(
-	from string,
-	mailOptions *client.MailOptions,
-	rcpts []string,
-	rcptsOptions []*deltasmtp.RcptOptions,
-	size int,
-) (*client.ContentCloser, []resolve.Failure, error) {
-	pipelining := &pipeliningPending{}
-
-	// MAIL FROM:
-	// No congestion possible on the first call
-	if err := c.client.Mail(from, mailOptions); err != nil {
-		return nil, nil, err
-	}
-	pipelining.mail = true
-
-	failures := []resolve.Failure{}
-
-	// RCPT TO:
-	for i, addr := range rcpts {
-		var rcptsOption *deltasmtp.RcptOptions
-		if len(rcptsOptions) > i {
-			rcptsOption = rcptsOptions[i]
-		}
-
-		err := c.client.Rcpt(addr, rcptsOption)
-		if err == client.ErrPipeliningCongestion {
-			if _, failures, err = c.handleResponses(pipelining, rcpts, failures, size); err != nil {
-				return nil, failures, err
-			}
-			err = c.client.Rcpt(addr, rcptsOption)
-		}
-
-		// The pending responses are matched to rcpts by position, read them and skip addr, it wasn't sent.
-		if errors.Is(err, client.ErrRefused) && c.client.PipeliningActive() {
-			var errResponses error
-			if _, failures, errResponses = c.handleResponses(pipelining, rcpts, failures, size); errResponses != nil {
-				return nil, failures, errResponses
-			}
-			pipelining.rcptsOffset++
-		} else {
-			pipelining.rcpts++
-		}
-
-		if err != nil {
-			if failures, err = rcptError(addr, failures, err); err != nil {
-				return nil, failures, err
-			}
-		}
-	}
-
-	// Without pipelining every RCPT response is known, don't send DATA without a recipient.
-	if !c.client.PipeliningActive() && len(failures) == len(rcpts) {
-		return nil, failures, nil
-	}
-
-	// DATA
-	w, err := c.client.Content(size)
-	if err == client.ErrPipeliningCongestion {
-		if _, failures, err = c.handleResponses(pipelining, rcpts, failures, size); err != nil {
-			return nil, failures, err
-		}
-		w, err = c.client.Content(size)
-	}
-	if err != nil {
-		return nil, failures, err
-	}
-	pipelining.data = true
-
-	// pipelining is active
-	if w == nil {
-		return c.handleResponses(pipelining, rcpts, failures, size)
-	}
-
-	return w, failures, nil
-}
-
-func (c *Mailer) handleResponses(pipelining *pipeliningPending, rcpts []string, failures []resolve.Failure, size int) (*client.ContentCloser, []resolve.Failure, error) {
-	if pipelining.mail {
-		pipelining.mail = false
-		if err := c.client.MailResponse(); err != nil {
-			// clear all pending responses, data couldn't be accepted
-			// (nothing to clear if the client closed the connection after a protocol error)
-			if !c.client.Connected() {
-				return nil, nil, err
-			}
-			if responseErr := c.client.ClearResponses(0); responseErr != nil {
-				return nil, nil, errors.Join(err, responseErr)
-			}
-			return nil, nil, err
-		}
-	}
-
-	pendingRcpts := rcpts[pipelining.rcptsOffset : pipelining.rcptsOffset+pipelining.rcpts]
-	pipelining.rcptsOffset += pipelining.rcpts
-	pipelining.rcpts = 0
-
-	for _, addr := range pendingRcpts {
-		if err := c.client.RcptResponse(); err != nil {
-			failures, err = rcptError(addr, failures, err)
-			if err != nil {
-				// Clears the pending DATA response as well, if any.
-				if !c.client.Connected() {
-					return nil, failures, err
-				}
-				if errResponse := c.client.ClearResponses(0); errResponse != nil {
-					return nil, failures, errors.Join(err, errResponse)
-				}
-				return nil, failures, err
-			}
-		}
-	}
-
-	if pipelining.data {
-		pipelining.data = false
-		return c.contentResponse(len(failures) == len(rcpts), failures, size)
-	}
-
-	return nil, failures, nil
-}
-
-// contentResponse reads the response to the pipelined DATA (or sends BDAT).
-// If every recipient was rejected, a rejection of DATA, or of the empty message ending
-// the transaction, is expected and not returned: the recipient failures are the result.
-func (c *Mailer) contentResponse(allRejected bool, failures []resolve.Failure, size int) (*client.ContentCloser, []resolve.Failure, error) {
-	// With pipelining BDAT isn't sent yet, don't send it without a recipient.
-	if allRejected && c.client.ChunkingActive() {
-		return nil, failures, nil
-	}
-
-	w, err := c.client.ContentResponse(size)
-	if err == nil && allRejected {
-		// RFC 2920: the client cannot assume that the DATA command will be rejected
-		// just because none of the RCPT TO commands worked.
-		err = w.Close()
-	}
-	if err != nil {
-		if _, ok := err.(*deltasmtp.Status); ok && allRejected {
-			return nil, failures, nil
-		}
-		return nil, failures, err
-	}
-	if allRejected {
-		return nil, failures, nil
-	}
-	return w, failures, nil
-}
-
-// reset resets open mail transfer and is pipelining aware
+// reset sends RSET.
 func (c *Mailer) reset() error {
 	return c.cmd(c.client.Reset(), c.client.ResetResponse)
 }
 
-// cmd returns the result of a command sent with err.
-// With pipelining active the response is read by response.
+// cmd returns the error of sending a command, or with pipelining its response.
 func (c *Mailer) cmd(err error, response func() error) error {
 	if err != nil || !c.client.PipeliningActive() {
 		return err
 	}
 	return response()
-}
-
-// abort ends a failed transaction and returns err.
-// A rejection leaves the connection in sync, so it is kept after a successful RSET.
-// Any other error, or a failing RSET, leaves it in an unknown state and it is closed.
-func (c *Mailer) abort(err error) error {
-	if isRejection(err) {
-		errReset := c.reset()
-		if errReset == nil {
-			return err
-		}
-		err = errors.Join(err, errReset)
-	}
-	return errors.Join(err, c.client.Close())
-}
-
-// isRejection reports whether err rejects a single command and leaves the connection in sync:
-// a server reply other than 421 (the server closes the connection) or a refusal of the client.
-func isRejection(err error) bool {
-	if smtpErr, ok := err.(*deltasmtp.Status); ok {
-		return smtpErr.Code != 421
-	}
-
-	return errors.Is(err, client.ErrRefused)
-}
-
-// rcptError records a rejected recipient as failure.
-// Other errors are returned with the failures recorded so far.
-func rcptError(addr string, failures []resolve.Failure, err error) ([]resolve.Failure, error) {
-	if !isRejection(err) {
-		return failures, err
-	}
-
-	failures = append(failures, resolve.Failure{
-		Rcpts: []string{addr},
-		Error: err,
-	})
-
-	return failures, nil
-}
-
-// Send send an email from
-// address from, to addresses to, with message stream in.
-//
-// It will use an existing connection if possible or create a new one otherwise.
-// It fails with ErrVerifying while a Verifier of c is active.
-//
-// The addresses in the rcpts parameter are the SMTP RCPT addresses.
-//
-// The in parameter should be a stream of an RFC 822-style email with headers
-// first, a blank line, and then the message body. The lines of in
-// should be CRLF terminated. The in headers should usually include
-// fields such as "From", "To", "Subject", and "Cc".  Sending "Bcc"
-// messages is accomplished by including an email address in the to
-// parameter but not including it in the in headers.
-func (c *Mailer) Send(ctx context.Context, from string, rcpt []string, in io.Reader) (status *deltasmtp.Status, failures []resolve.Failure, err error) {
-	return c.SendAdvanced(ctx, from, client.MailOptions{}, rcpt, nil, in)
-}
-
-// SendAdvanced send an email from
-// address from, to addresses to, with message stream in.
-//
-// It will use an existing connection if possible or create a new one otherwise.
-// It fails with ErrVerifying while a Verifier of c is active.
-//
-// The addresses in the rcpts parameter are the SMTP RCPT addresses.
-// If mailOptions.Size isn't set, it is taken from in (if it has a Len method).
-// If mailOptions.SMTPUTF8 isn't set, it is used if the server supports it, a
-// server without it rejects non-ASCII addresses.
-// If rcptsOptions isn't set for some rcpts (e.g. len(rcpts) > len(rcptsOptions)),
-// default values are used for these recipients.
-//
-// The in parameter should be a stream of an RFC 822-style email with headers
-// first, a blank line, and then the message body. The lines of in
-// should be CRLF terminated. The in headers should usually include
-// fields such as "From", "To", "Subject", and "Cc".  Sending "Bcc"
-// messages is accomplished by including an email address in the to
-// parameter but not including it in the in headers.
-//
-// The status and err can both be empty if all recipients were rejected by the server
-func (c *Mailer) SendAdvanced(
-	ctx context.Context,
-	from string,
-	mailOptions client.MailOptions,
-	rcpts []string,
-	rcptsOptions []*deltasmtp.RcptOptions,
-	in io.Reader,
-) (status *deltasmtp.Status, failures []resolve.Failure, err error) {
-	size := 0
-	if wt, ok := in.(Len); ok {
-		size = wt.Len()
-	}
-
-	if len(rcpts) < 1 {
-		return nil, nil, errors.New("no recipients")
-	}
-
-	if c.verifying {
-		return nil, nil, ErrVerifying
-	}
-
-	// connect closes the connection on failure.
-	if !c.client.Connected() {
-		if err = c.connect(ctx); err != nil {
-			return nil, nil, err
-		}
-	}
-
-	mailOptions.Size = cmp.Or(mailOptions.Size, int64(size))
-	mailOptions.SMTPUTF8 = mailOptions.SMTPUTF8 || c.supportsUTF8()
-
-	// From here on every failure has to end the transaction, otherwise the next
-	// Send on this connection runs into an open transaction.
-	w, failures, err := c.prepare(from, &mailOptions, rcpts, rcptsOptions, size)
-	if err != nil {
-		return nil, failures, c.abort(err)
-	}
-
-	// every recipient was rejected
-	if w == nil {
-		if err = c.reset(); err != nil {
-			return nil, failures, errors.Join(err, c.client.Close())
-		}
-		return nil, failures, nil
-	}
-
-	buf := getCopyBuffer()
-	_, err = io.CopyBuffer(w.Writer(), in, *buf)
-	copyBuffers.Put(buf)
-	if err != nil {
-		// The message is only partly sent, the connection can't be reused. This includes a
-		// rejected BDAT chunk, which would leave it in sync, but can't be told apart from an
-		// *deltasmtp.Status returned by in (e.g. the data reader of a server).
-		return nil, failures, errors.Join(err, c.client.Close())
-	}
-
-	status, err = w.CloseWithResponse()
-	if err != nil {
-		return nil, failures, c.abort(err)
-	}
-
-	return status, failures, nil
 }
 
 // Disconnect ends current connection gracefully, if any exists.
@@ -494,185 +150,55 @@ func (c *Mailer) ServerName() string {
 	return c.client.ServerName()
 }
 
-// Report contains responses and failures after sending a mail.
-type Report struct {
-	Responses []Response
-	Failures  []resolve.Failure
+// mail sends MAIL, counted against the transaction limit, see mailError for the errors.
+// wait reads a pipelined response as well, otherwise it has to be passed to mailError.
+func (c *Mailer) mail(from string, opts *client.MailOptions, wait bool) error {
+	c.transactions++
+	err := c.client.Mail(from, opts)
+	if wait {
+		err = c.cmd(err, c.client.MailResponse)
+	}
+	return c.mailError(err)
 }
 
-// Response contains the response of a smtp server for specific recipients.
-type Response struct {
-	Status *deltasmtp.Status
-	Rcpts  []string
+// errRenew asks to send a MAIL again on a new connection, see mailError.
+var errRenew = errors.New("smtp: transaction limit of the connection reached")
+
+// mailError returns err of MAIL, or errRenew on a 421 (the client closed the connection)
+// after earlier transactions: a server may limit them without MAILMAX (e.g. Exim). The
+// limit isn't learned, the 421 may have another reason.
+func (c *Mailer) mailError(err error) error {
+	var st *deltasmtp.Status
+	if c.transactions > 1 && errors.As(err, &st) && st.Code == 421 {
+		return errRenew
+	}
+	return err
 }
 
-// Send sends the mail msg from from to rcpts.
-//
-// The recipients are grouped by their MX servers, or sent to the servers of
-// WithServerAddresses, and every server gets its own connection and
-// transaction, so msg is sent once per server:
-//
-//   - string or []byte: every server gets a new reader of msg, which isn't
-//     modified or retained. The size is known, so it is announced with SIZE
-//     and BDAT sends the message as a single chunk, if the server supports
-//     them.
-//   - func() io.Reader or func() (io.ReadCloser, error): called once per
-//     server, e.g. to open a file for a message that shouldn't be held in
-//     memory. The returned reader is read once and closed after the
-//     transaction if it implements io.Closer, errors from Close are ignored.
-//     An error from the function fails the recipients of that server. A
-//     reader with a Len() int method is announced with SIZE.
-//
-// Only these exact types are accepted, convert named types (e.g. a type EML
-// string) at the call site.
-//
-// msg should be an RFC 822-style email with headers first, a blank line, and
-// then the body, with CRLF terminated lines.
-//
-// Recipients that couldn't be resolved (e.g. no MX record), were rejected or
-// whose server failed are reported in Report.Failures. err is only set if the
-// MX lookup failed temporarily, e.g. the DNS server didn't respond.
-//
-// The default SecurityStartTLS also applies to delivery via MX records:
-// servers without STARTTLS or a valid certificate fail. Pass
-// WithSecurity(SecurityPreferStartTLS) for opportunistic TLS as usual between
-// mail servers.
-func Send[M string | []byte | func() io.Reader | func() (io.ReadCloser, error)](
-	ctx context.Context, from string, rcpts []string, msg M, opts ...Option,
-) (Report, error) {
-	// The type switch runs once per call, not per server.
-	var open func() (io.Reader, error)
-
-	switch m := any(msg).(type) {
-	case string:
-		open = func() (io.Reader, error) { return strings.NewReader(m), nil }
-	case []byte:
-		open = func() (io.Reader, error) { return bytes.NewReader(m), nil }
-	case func() io.Reader:
-		open = func() (io.Reader, error) { return m(), nil }
-	case func() (io.ReadCloser, error):
-		open = func() (io.Reader, error) {
-			r, err := m()
-			if err != nil {
-				return nil, fmt.Errorf("mailer: open message: %w", err)
-			}
-			return r, nil
-		}
-	default:
-		panic("unreachable: M is one of the types of its constraint")
+// ready connects if needed, or again once the connection has used up its transactions.
+func (c *Mailer) ready(ctx context.Context) error {
+	if c.client.Connected() && !c.exhausted() {
+		return nil
 	}
-
-	return sendAll(ctx, from, rcpts, open, opts)
+	_ = c.Disconnect() // no-op without a connection, closes it also on failure
+	return c.connect(ctx)
 }
 
-// sendAll sends a reader returned by open to every server of rcpts.
-func sendAll(ctx context.Context, from string, rcpts []string, open func() (io.Reader, error), opts []Option) (res Report, err error) {
-	config := NewConfig(opts...)
-
-	mx, err := servers(ctx, rcpts, config)
-	if err != nil {
-		return Report{}, err
+// exhausted reports whether the connection reached RFC 9422 MAILMAX or WithMaxTransactions.
+func (c *Mailer) exhausted() bool {
+	n, ok := c.client.MaxTransactions()
+	if !ok {
+		n = c.cfg.maxTransactions
 	}
-
-	res.Failures = mx.Failures
-
-	for _, server := range mx.Servers {
-		status, failures, err := sendOpened(ctx, server, from, config, open)
-
-		if len(failures) > 0 {
-			server.Rcpts = acceptedRcpts(server.Rcpts, failures)
-			res.Failures = append(res.Failures, failures...)
-		}
-
-		// Only blame the transaction error on recipients that do not
-		// As there should be recipients left
-		if err != nil {
-			if len(server.Rcpts) > 0 {
-				res.Failures = append(res.Failures, resolve.Failure{
-					Rcpts: server.Rcpts,
-					Error: err,
-				})
-			}
-			continue
-		}
-
-		// No request was made if all rcpts were rejected.
-		if len(server.Rcpts) > 0 {
-			res.Responses = append(res.Responses, Response{
-				Status: status,
-				Rcpts:  server.Rcpts,
-			})
-		}
-	}
-	return res, nil
+	return n > 0 && c.transactions >= n
 }
 
-// servers returns the configured server addresses for all rcpts, or resolves the MX servers if none are set.
-func servers(ctx context.Context, rcpts []string, config Config) (resolve.Result, error) {
-	if len(config.extra.serverAddresses) > 0 {
-		return resolve.Result{Servers: []resolve.Server{{Rcpts: rcpts, Addresses: config.extra.serverAddresses}}}, nil
+// maxRecipients returns RFC 9422 RCPTMAX or WithMaxRecipients, 0 is unlimited.
+func (c *Mailer) maxRecipients() int {
+	if n, ok := c.client.MaxRecipients(); ok {
+		return n
 	}
-
-	r := resolve.New(nil)
-
-	return r.Recipients(ctx, rcpts)
-}
-
-// acceptedRcpts returns rcpts without the recipients named by failures, keeping
-// the order. rcpts isn't modified, it may be the slice passed by the caller.
-//
-// The failed recipients are collected in a set first, comparing every recipient
-// with every failure is quadratic and slow with many rejected recipients.
-func acceptedRcpts(rcpts []string, failures []resolve.Failure) []string {
-	failed := make(map[string]struct{}, len(failures))
-	for _, fail := range failures {
-		for _, rcpt := range fail.Rcpts {
-			failed[rcpt] = struct{}{}
-		}
-	}
-
-	accepted := make([]string, 0, max(len(rcpts)-len(failed), 0))
-	for _, rcpt := range rcpts {
-		if _, ok := failed[rcpt]; !ok {
-			accepted = append(accepted, rcpt)
-		}
-	}
-	return accepted
-}
-
-// sendOpened sends a reader returned by open to server and closes it afterwards
-// if it is an io.Closer.
-func sendOpened(ctx context.Context, server resolve.Server, from string, config Config, open func() (io.Reader, error)) (status *deltasmtp.Status, failures []resolve.Failure, err error) {
-	in, err := open()
-	if err != nil {
-		return nil, nil, err
-	}
-
-	if c, ok := in.(io.Closer); ok {
-		defer func() { _ = c.Close() }()
-	}
-
-	return send(ctx, server, from, config, in)
-}
-
-func send(ctx context.Context, server resolve.Server, from string, config Config, in io.Reader) (status *deltasmtp.Status, failures []resolve.Failure, err error) {
-	config.extra.serverAddresses = server.Addresses
-	client := NewFromConfig(config)
-	defer func() { _ = client.Disconnect() }()
-
-	return client.Send(ctx, from, server.Rcpts, in)
-}
-
-// copyBuffers holds the buffers copying the message content, shared by all
-// mailers. io.Copy would allocate (and zero) 32 KB for every message.
-var copyBuffers sync.Pool
-
-func getCopyBuffer() *[]byte {
-	if b, ok := copyBuffers.Get().(*[]byte); ok {
-		return b
-	}
-	b := make([]byte, 32*1024)
-	return &b
+	return c.cfg.maxRecipients
 }
 
 // supportsUTF8 reports whether the server supports SMTPUTF8.

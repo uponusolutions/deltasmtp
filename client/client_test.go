@@ -1547,3 +1547,24 @@ func TestMailVerifyUTF8(t *testing.T) {
 		"MAIL FROM:<jösé@example.org> SMTPUTF8\r\n"+
 		"VRFY jösé@example.org SMTPUTF8\r\n", wrote.String())
 }
+
+// TestClient421Closes checks that a 421 reply closes the connection, the server closes
+// it as well (RFC 5321 section 3.8), also if any code is expected.
+func TestClient421Closes(t *testing.T) {
+	for _, expect := range []int{250, 0} { // 0 expects any code
+		f := &tester.FakeServer{Handlers: map[string]tester.FakeHandler{
+			"NOOP": func(s *tester.FakeSession, _ string) bool {
+				s.Reply("421 4.3.2 shutting down")
+				return true // a misbehaving server keeps it open
+			},
+		}}
+		c := New()
+		require.NoError(t, c.Dial(context.Background(), f.Listen(t)))
+
+		err := c.cmdValid(pipeliningTypeForbidden, expect, "NOOP")
+		if expect != 0 {
+			require.ErrorContains(t, err, "421 4.3.2")
+		}
+		require.False(t, c.Connected())
+	}
+}
