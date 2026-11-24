@@ -3,16 +3,59 @@
 [![coverage](https://raw.githubusercontent.com/uponusolutions/deltasmtp/badges/.badges/main/coverage.svg)](https://uponusolutions.github.io/deltasmtp/coverage/)
 [![reference](https://pkg.go.dev/badge/github.com/uponusolutions/deltasmtp.svg)](https://pkg.go.dev/github.com/uponusolutions/deltasmtp)
 
-An ESMTP client and server library written in Go.
+A fast ESMTP client and server library for Go, with a mailer that sends a mail
+in a single call.
 
-It started as a fork of [emersion/go-smtp](https://github.com/emersion/go-smtp)
-and has since been detached from it. It adds a reworked, context-aware API, a high-level mailer that resolves MX records and
-reports per-recipient results, and support for extensions such as CHUNKING/BDAT,
-DELIVERBY, MT-PRIORITY, RRVS and XOORG. Both client and server speak PIPELINING.
+- **Fast:** tuned hot paths, buffers reused across mails and efficient
+  algorithms keep the cost per mail low, see [benchmarks](#benchmarks).
+- **Easy to send with:** `mailer.Send` resolves the MX records, delivers to every
+  server and reports the result per recipient.
+- **Secure by default:** STARTTLS with certificate verification is required
+  unless you opt out.
+- **Modern ESMTP:** PIPELINING and CHUNKING/BDAT on both sides, SMTPUTF8, DSN,
+  REQUIRETLS, DELIVERBY, MT-PRIORITY, RRVS and XOORG, see [extensions](#extensions).
+- **Context-aware** client, server and mailer, with structured
+  `*deltasmtp.Status` replies.
 
 ```sh
 go get github.com/uponusolutions/deltasmtp
 ```
+
+## Quick start
+
+```go
+report, err := mailer.Send(ctx, "alice@example.com",
+    []string{"bob@example.org", "carol@example.net"},
+    func() io.Reader { return strings.NewReader(eml) },
+)
+```
+
+That is all: no connection handling, no MX lookups, no loop over servers. Try
+it without network access, against a server running in memory:
+
+```sh
+go run ./examples/local
+```
+
+or for real, directly to the MX servers of the recipients or through a relay:
+
+```sh
+go run ./examples/send -from alice@example.com bob@example.org
+go run ./examples/send -from alice@example.com -relay smtp.example.com:587 \
+    -user alice -pass secret bob@example.org
+```
+
+## Benchmarks
+
+CI runs the benchmarks on every push to `main` and tracks them over time:
+
+- [Comparison with go-smtp](https://uponusolutions.github.io/deltasmtp/dev/compare/):
+  deltasmtp and go-smtp sending small and large mails.
+- [Benchmark page](https://uponusolutions.github.io/deltasmtp/dev/bench/):
+  mailer, client, server and the dot and BDAT codecs.
+
+`make bench-compare` and `make bench` run them locally. See
+[Performance](#performance) for where the speed comes from.
 
 ## Packages
 
@@ -25,8 +68,9 @@ go get github.com/uponusolutions/deltasmtp
 | [`resolve`](https://pkg.go.dev/github.com/uponusolutions/deltasmtp/resolve) | MX lookup that groups recipients by target server |
 | [`tester`](https://pkg.go.dev/github.com/uponusolutions/deltasmtp/tester) | Test utilities: fake connections, certificates, in-memory server |
 
-See [examples](https://github.com/uponusolutions/deltasmtp/tree/main/examples) for
-runnable programs.
+Runnable [examples](https://github.com/uponusolutions/deltasmtp/tree/main/examples):
+[`send`](examples/send/main.go) delivers a mail via MX or a relay,
+[`local`](examples/local/main.go) sends to an in-memory server.
 
 ## Sending mail
 
@@ -55,7 +99,12 @@ for _, r := range report.Responses {
 
 Rejected recipients end up in `Failures` instead of aborting the whole send, so a
 partial delivery is still reported as a success for the recipients that were
-accepted.
+accepted. `err` is only set if the recipients couldn't be resolved.
+
+The default `SecurityStartTLS` also applies to MX delivery, so servers without
+STARTTLS or a valid certificate fail. Mail servers use opportunistic TLS among
+each other, pass `mailer.WithSecurity(mailer.SecurityPreferStartTLS)` to do the
+same.
 
 To relay through a fixed host instead of resolving MX records, pass
 `mailer.WithServerAddresses`. A `*mailer.Mailer` keeps its connection open across
@@ -81,6 +130,11 @@ MX servers that lack a valid certificate.
 
 `WithServerAddressesPrio` takes groups of addresses that are tried in order, and
 `SendAdvanced` accepts explicit `MailOptions` and per-recipient `RcptOptions`.
+
+`mailer.Verify` checks recipients without sending a mail, with VRFY or with
+RCPT TO in a transaction that is reset afterwards, and reports them like `Send`
+does. `Mailer.Verifier` does the same one recipient at a time on an open
+connection.
 
 ## Running a server
 
@@ -176,16 +230,14 @@ round trip per command in both the mailer and the server; the client uses it
 whenever the server advertises PIPELINING, `client.WithPipelining(false)` turns
 it off.
 
-Benchmarks run in CI and are published on the
-[benchmark page](https://uponusolutions.github.io/deltasmtp/dev/bench/), the
-comparison with [go-smtp](https://github.com/emersion/go-smtp) (each library's
-client sending to its own server, a small and a large mail, both in their fastest
-configuration) on the
-[comparison page](https://uponusolutions.github.io/deltasmtp/dev/compare/); coverage
-is on the [coverage page](https://uponusolutions.github.io/deltasmtp/coverage/).
+A message of known size (anything with a `Len() int`, such as
+`*strings.Reader` or `*bytes.Reader`) is announced with SIZE and sent as a
+single BDAT chunk, without dot-stuffing on either side. See
+[benchmarks](#benchmarks) for the numbers.
 
 ## Differences from emersion/go-smtp
 
+deltasmtp started as a fork of go-smtp and has since been detached from it.
 The API is not compatible with upstream. The notable changes:
 
 - **Split into packages.** Client, server, mailer, MX resolution and test helpers
@@ -207,8 +259,11 @@ The API is not compatible with upstream. The notable changes:
   and reports per-recipient failures.
 - **No LMTP.** Upstream supports LMTP; deltasmtp does not.
 
-If you need a very stable API or LMTP, use upstream. It is a well-maintained
-library and deltasmtp exists only because we needed a different set of tradeoffs.
+deltasmtp builds on the work of go-smtp and its contributors, and we are
+grateful for it. go-smtp is mature, widely used and well maintained. Choose it
+if you need LMTP or an API that has been stable for years. deltasmtp is younger
+and its API still changes. It exists because we needed more performance and
+proprietary extensions such as XOORG, which are out of scope for go-smtp.
 
 ## Relationship with net/smtp
 
