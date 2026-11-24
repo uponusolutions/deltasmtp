@@ -3,11 +3,14 @@
 package mailer
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
+	"strings"
 	"sync"
 
 	"github.com/uponusolutions/deltasmtp"
@@ -503,14 +506,67 @@ type Response struct {
 	Rcpts  []string
 }
 
-// Send just sends a mail.
-// in is called multiple times if there are recipients from different servers.
+// Send sends the mail msg from from to rcpts.
+//
+// The recipients are grouped by their MX servers, or sent to the servers of
+// WithServerAddresses, and every server gets its own connection and
+// transaction, so msg is sent once per server:
+//
+//   - string or []byte: every server gets a new reader of msg, which isn't
+//     modified or retained. The size is known, so it is announced with SIZE
+//     and BDAT sends the message as a single chunk, if the server supports
+//     them.
+//   - func() io.Reader or func() (io.ReadCloser, error): called once per
+//     server, e.g. to open a file for a message that shouldn't be held in
+//     memory. The returned reader is read once and closed after the
+//     transaction if it implements io.Closer, errors from Close are ignored.
+//     An error from the function fails the recipients of that server. A
+//     reader with a Len() int method is announced with SIZE.
+//
+// Only these exact types are accepted, convert named types (e.g. a type EML
+// string) at the call site.
+//
+// msg should be an RFC 822-style email with headers first, a blank line, and
+// then the body, with CRLF terminated lines.
+//
+// Recipients that couldn't be resolved (e.g. no MX record), were rejected or
+// whose server failed are reported in Report.Failures. err is only set if the
+// MX lookup failed temporarily, e.g. the DNS server didn't respond.
 //
 // The default SecurityStartTLS also applies to delivery via MX records:
 // servers without STARTTLS or a valid certificate fail. Pass
 // WithSecurity(SecurityPreferStartTLS) for opportunistic TLS as usual between
 // mail servers.
-func Send(ctx context.Context, from string, rcpts []string, in func() io.Reader, opts ...Option) (res Report, err error) {
+func Send[M string | []byte | func() io.Reader | func() (io.ReadCloser, error)](
+	ctx context.Context, from string, rcpts []string, msg M, opts ...Option,
+) (Report, error) {
+	// The type switch runs once per call, not per server.
+	var open func() (io.Reader, error)
+
+	switch m := any(msg).(type) {
+	case string:
+		open = func() (io.Reader, error) { return strings.NewReader(m), nil }
+	case []byte:
+		open = func() (io.Reader, error) { return bytes.NewReader(m), nil }
+	case func() io.Reader:
+		open = func() (io.Reader, error) { return m(), nil }
+	case func() (io.ReadCloser, error):
+		open = func() (io.Reader, error) {
+			r, err := m()
+			if err != nil {
+				return nil, fmt.Errorf("mailer: open message: %w", err)
+			}
+			return r, nil
+		}
+	default:
+		panic("unreachable: M is one of the types of its constraint")
+	}
+
+	return sendAll(ctx, from, rcpts, open, opts)
+}
+
+// sendAll sends a reader returned by open to every server of rcpts.
+func sendAll(ctx context.Context, from string, rcpts []string, open func() (io.Reader, error), opts []Option) (res Report, err error) {
 	config := NewConfig(opts...)
 
 	mx, err := servers(ctx, rcpts, config)
@@ -521,7 +577,7 @@ func Send(ctx context.Context, from string, rcpts []string, in func() io.Reader,
 	res.Failures = mx.Failures
 
 	for _, server := range mx.Servers {
-		status, failures, err := send(ctx, server, from, config, in())
+		status, failures, err := sendOpened(ctx, server, from, config, open)
 
 		if len(failures) > 0 {
 			server.Rcpts = acceptedRcpts(server.Rcpts, failures)
@@ -582,6 +638,21 @@ func acceptedRcpts(rcpts []string, failures []resolve.Failure) []string {
 		}
 	}
 	return accepted
+}
+
+// sendOpened sends a reader returned by open to server and closes it afterwards
+// if it is an io.Closer.
+func sendOpened(ctx context.Context, server resolve.Server, from string, config Config, open func() (io.Reader, error)) (status *deltasmtp.Status, failures []resolve.Failure, err error) {
+	in, err := open()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if c, ok := in.(io.Closer); ok {
+		defer func() { _ = c.Close() }()
+	}
+
+	return send(ctx, server, from, config, in)
 }
 
 func send(ctx context.Context, server resolve.Server, from string, config Config, in io.Reader) (status *deltasmtp.Status, failures []resolve.Failure, err error) {

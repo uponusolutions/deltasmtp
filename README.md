@@ -25,9 +25,7 @@ go get github.com/uponusolutions/deltasmtp
 
 ```go
 report, err := mailer.Send(ctx, "alice@example.com",
-    []string{"bob@example.org", "carol@example.net"},
-    func() io.Reader { return strings.NewReader(eml) },
-)
+    []string{"bob@example.org", "carol@example.net"}, eml)
 ```
 
 That is all: no connection handling, no MX lookups, no loop over servers. Try
@@ -75,15 +73,15 @@ Runnable [examples](https://github.com/uponusolutions/deltasmtp/tree/main/exampl
 ## Sending mail
 
 `mailer.Send` resolves the MX records for every recipient, groups them by target
-server and sends one transaction per server. The message is passed as a factory
-because it is consumed once per server.
+server and sends one transaction per server. The message is a `string` or a
+`[]byte` and is sent to every server.
 
 ```go
 report, err := mailer.Send(
     ctx,
     "alice@example.com",
     []string{"bob@example.org", "carol@example.net"},
-    func() io.Reader { return strings.NewReader(eml) },
+    eml,
 )
 if err != nil {
     return err
@@ -99,7 +97,18 @@ for _, r := range report.Responses {
 
 Rejected recipients end up in `Failures` instead of aborting the whole send, so a
 partial delivery is still reported as a success for the recipients that were
-accepted. `err` is only set if the recipients couldn't be resolved.
+accepted. Recipients without an MX record are failures as well, `err` is only
+set if the MX lookup failed temporarily, e.g. the DNS server didn't respond.
+
+For a message that shouldn't be held in memory, pass a function that opens it.
+It is called once per server, the reader is closed after the transaction and
+an error fails the recipients of that server:
+
+```go
+report, err := mailer.Send(ctx, from, rcpts, func() (io.ReadCloser, error) {
+    return os.Open("mail.eml")
+})
+```
 
 The default `SecurityStartTLS` also applies to MX delivery, so servers without
 STARTTLS or a valid certificate fail. Mail servers use opportunistic TLS among
@@ -117,8 +126,11 @@ m := mailer.New(
 )
 defer func() { _ = m.Disconnect() }()
 
-status, failures, err := m.Send(ctx, from, rcpts, msg)
+status, failures, err := m.Send(ctx, from, rcpts, strings.NewReader(eml))
 ```
+
+A `Mailer` sends to one server, so its `Send` reads the message once from an
+`io.Reader`, which can also stream it from a file or a pipe.
 
 By default the mailer requires STARTTLS and verifies the server certificate
 (`SecurityStartTLS`), so mail and credentials are never sent unencrypted.

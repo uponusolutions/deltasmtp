@@ -13,9 +13,7 @@ import (
 	_ "embed"
 	"flag"
 	"fmt"
-	"io"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/uponusolutions/deltasmtp/mailer"
@@ -59,8 +57,8 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
-	// The message is a factory: it is read once per target server.
-	report, err := mailer.Send(ctx, *from, rcpts, func() io.Reader { return strings.NewReader(eml) }, opts...)
+	// The recipients are grouped by server, eml is sent to every server.
+	report, err := mailer.Send(ctx, *from, rcpts, eml, opts...)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "send:", err)
 		os.Exit(1)

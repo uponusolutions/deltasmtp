@@ -7,7 +7,6 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"log/slog"
 	"slices"
@@ -245,7 +244,7 @@ func TestClient_SendMailDirect(t *testing.T) {
 		context.Background(),
 		from,
 		recipients,
-		func() io.Reader { return bytes.NewReader(data) },
+		data,
 		withTestServer(addr[0]),
 		WithBasic(client.WithPipelining(false)),
 	)
@@ -267,7 +266,7 @@ func TestClient_SendMailDirectPipelining(t *testing.T) {
 		context.Background(),
 		from,
 		recipients,
-		func() io.Reader { return bytes.NewReader(data) },
+		data,
 		withTestServer(addr[0]),
 		WithBasic(client.WithPipelining(true)),
 	)
@@ -300,7 +299,7 @@ func TestClient_SendMailDirectManyRcptsPipelining(t *testing.T) {
 		context.Background(),
 		from,
 		recipients,
-		func() io.Reader { return bytes.NewReader(data) },
+		data,
 		withTestServer(addr[2]),
 		WithBasic(client.WithPipelining(true)),
 	)
@@ -328,7 +327,7 @@ func TestClient_SendMailDirectTooManyRcptsPipelining(t *testing.T) {
 				context.Background(),
 				from,
 				recipients,
-				func() io.Reader { return bytes.NewReader(data) },
+				data,
 				withTestServer(sa),
 				basic,
 			)
@@ -357,7 +356,7 @@ func TestClient_SendMailDirectFailPipelining(t *testing.T) {
 		context.Background(),
 		from,
 		recipients,
-		func() io.Reader { return bytes.NewReader(data) },
+		data,
 		withTestServer(addr[0]),
 		WithBasic(client.WithPipelining(true)),
 	)
@@ -379,7 +378,7 @@ func TestClient_SendMailDirectAllRejectedPipelining(t *testing.T) {
 		context.Background(),
 		from,
 		recipients,
-		func() io.Reader { return bytes.NewReader(data) },
+		data,
 		withTestServer(addr[0]),
 		WithBasic(client.WithPipelining(true)),
 	)
@@ -409,7 +408,7 @@ func sendReport(t *testing.T, rcpts []string, pipelining bool) Report {
 		context.Background(),
 		"alice@internal.com",
 		rcpts,
-		func() io.Reader { return bytes.NewReader([]byte("Hello World!")) },
+		"Hello World!",
 		opts...,
 	)
 	require.NoError(t, err)
@@ -493,7 +492,7 @@ func TestClient_SendMailPartiallyRejectedManyRcpts(t *testing.T) {
 			context.Background(),
 			"alice@internal.com",
 			rcpts,
-			func() io.Reader { return bytes.NewReader([]byte("Hello World!")) },
+			"Hello World!",
 			withTestServer(addr[2]),
 			WithBasic(client.WithPipelining(true)),
 		)
@@ -582,7 +581,7 @@ func TestClient_SendMailDirectFail(t *testing.T) {
 		context.Background(),
 		from,
 		recipients,
-		func() io.Reader { return bytes.NewReader(data) },
+		data,
 		withTestServer(addr[0]),
 		WithBasic(client.WithPipelining(false)),
 	)
