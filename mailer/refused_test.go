@@ -40,14 +40,6 @@ func TestMailer_RefusedRcpt(t *testing.T) {
 			require.NotNil(t, status)
 			requireRefusedFailures(t, failures)
 
-			failures, err = m.Verify(t.Context(), VerifyRcpt, "alice@internal.com", refusedRcpts)
-			require.NoError(t, err)
-			requireRefusedFailures(t, failures)
-
-			failures, err = m.Verify(t.Context(), VerifyVrfy, "alice@internal.com", refusedRcpts)
-			require.NoError(t, err)
-			requireRefusedFailures(t, failures)
-
 			// every recipient refused
 			status, failures, err = m.Send(t.Context(), "alice@internal.com", refusedRcpts[1:2],
 				bytes.NewBufferString("Hello World!\r\n"))
@@ -72,10 +64,6 @@ func TestMailer_RefusedMail(t *testing.T) {
 
 			_, _, err := m.SendAdvanced(t.Context(), "alice@internal.com", &client.MailOptions{RequireTLS: true},
 				[]string{"bob@external.com"}, nil, bytes.NewBufferString("Hello World!\r\n"))
-			require.ErrorIs(t, err, client.ErrRefused)
-
-			_, err = m.VerifyAdvanced(t.Context(), VerifyRcpt, "alice@internal.com",
-				&client.MailOptions{SMTPUTF8: true}, []string{"bob@external.com"})
 			require.ErrorIs(t, err, client.ErrRefused)
 
 			_, failures, err := m.Send(t.Context(), "alice@internal.com", []string{"bob@external.com"},

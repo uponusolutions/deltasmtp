@@ -681,27 +681,6 @@ func TestClient_AllRejectedChunkingKeepsConnection(t *testing.T) {
 	assert.True(t, c.Connected(), "connection must survive an all rejected transaction")
 }
 
-func TestClient_VerifyUTF8Force(t *testing.T) {
-	c := New(withTestServer(addr[0]))
-	require.NotNil(t, c)
-
-	require.NoError(t, c.Connect(context.Background()))
-	defer func() {
-		assert.NoError(t, c.Terminate())
-
-		// Calling again must be ok.
-		assert.NoError(t, c.Disconnect())
-	}()
-
-	failures, err := c.VerifyAdvanced(t.Context(), VerifyVrfy, "",
-		&client.MailOptions{SMTPUTF8: true}, []string{"Bob@external.com"})
-	require.NoError(t, err)
-	require.Len(t, failures, 1)
-	require.ErrorIs(t, failures[0].Error, client.ErrRefused)
-	require.ErrorContains(t, failures[0].Error, "server does not support SMTPUTF8")
-	assert.True(t, c.Connected())
-}
-
 func TestClient_InvalidLocalName(t *testing.T) {
 	c := New(withTestServer(addr[0]), WithBasic(
 		client.WithLocalName("hostinjection>\n\rDATA\r\nInjected message body\r\n.\r\nQUIT\r\n")),
