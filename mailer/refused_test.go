@@ -62,7 +62,7 @@ func TestMailer_RefusedMail(t *testing.T) {
 			m := New(opts...)
 			t.Cleanup(func() { _ = m.Terminate() })
 
-			_, _, err := m.SendAdvanced(t.Context(), "alice@internal.com", &client.MailOptions{RequireTLS: true},
+			_, _, err := m.SendAdvanced(t.Context(), "alice@internal.com", client.MailOptions{RequireTLS: true},
 				[]string{"bob@external.com"}, nil, bytes.NewBufferString("Hello World!\r\n"))
 			require.ErrorIs(t, err, client.ErrRefused)
 

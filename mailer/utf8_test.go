@@ -41,16 +41,10 @@ func TestSendAutoUTF8(t *testing.T) {
 		name string
 		from string
 		rcpt string
-		opts *client.MailOptions
-		utf8 bool
 	}{
-		{name: "ascii", from: "a@example.org", rcpt: "b@example.org", utf8: true},
-		{name: "utf8 from", from: "jösé@example.org", rcpt: "b@example.org", utf8: true},
-		{name: "utf8 rcpt", from: "a@example.org", rcpt: "jösé@example.org", utf8: true},
-		{
-			name: "disabled", from: "a@example.org", rcpt: "b@example.org",
-			opts: &client.MailOptions{},
-		},
+		{name: "ascii", from: "a@example.org", rcpt: "b@example.org"},
+		{name: "utf8 from", from: "jösé@example.org", rcpt: "b@example.org"},
+		{name: "utf8 rcpt", from: "a@example.org", rcpt: "jösé@example.org"},
 	}
 
 	c := New(withTestServer(address))
@@ -58,11 +52,11 @@ func TestSendAutoUTF8(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, failures, err := c.SendAdvanced(t.Context(), tt.from, tt.opts, []string{tt.rcpt}, nil,
+			_, failures, err := c.SendAdvanced(t.Context(), tt.from, client.MailOptions{}, []string{tt.rcpt}, nil,
 				strings.NewReader("Subject: äöü\r\n\r\nbody\r\n"))
 			require.NoError(t, err)
 			require.Empty(t, failures)
-			assert.Equal(t, tt.utf8, utf8.Load())
+			assert.True(t, utf8.Load())
 		})
 	}
 }

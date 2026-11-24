@@ -3,6 +3,7 @@
 package mailer
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"io"
@@ -18,9 +19,6 @@ import (
 type Mailer struct {
 	client *client.Client
 	cfg    additionalConfig
-
-	// mailOptions is reused to avoid an allocation per message.
-	mailOptions client.MailOptions
 
 	// verifying is set while a Verifier holds the connection.
 	verifying bool
@@ -381,7 +379,7 @@ func rcptError(addr string, failures []resolve.Failure, err error) ([]resolve.Fa
 // messages is accomplished by including an email address in the to
 // parameter but not including it in the in headers.
 func (c *Mailer) Send(ctx context.Context, from string, rcpt []string, in io.Reader) (status *deltasmtp.Status, failures []resolve.Failure, err error) {
-	return c.SendAdvanced(ctx, from, nil, rcpt, nil, in)
+	return c.SendAdvanced(ctx, from, client.MailOptions{}, rcpt, nil, in)
 }
 
 // SendAdvanced send an email from
@@ -391,8 +389,9 @@ func (c *Mailer) Send(ctx context.Context, from string, rcpt []string, in io.Rea
 // It fails with ErrVerifying while a Verifier of c is active.
 //
 // The addresses in the rcpts parameter are the SMTP RCPT addresses.
-// If mailOptions isn't set, the size is taken from in (if it has a Len method)
-// and SMTPUTF8 is used if the server supports it, a server without it rejects non-ASCII addresses.
+// If mailOptions.Size isn't set, it is taken from in (if it has a Len method).
+// If mailOptions.SMTPUTF8 isn't set, it is used if the server supports it, a
+// server without it rejects non-ASCII addresses.
 // If rcptsOptions isn't set for some rcpts (e.g. len(rcpts) > len(rcptsOptions)),
 // default values are used for these recipients.
 //
@@ -407,7 +406,7 @@ func (c *Mailer) Send(ctx context.Context, from string, rcpt []string, in io.Rea
 func (c *Mailer) SendAdvanced(
 	ctx context.Context,
 	from string,
-	mailOptions *client.MailOptions,
+	mailOptions client.MailOptions,
 	rcpts []string,
 	rcptsOptions []*deltasmtp.RcptOptions,
 	in io.Reader,
@@ -432,17 +431,12 @@ func (c *Mailer) SendAdvanced(
 		}
 	}
 
-	if mailOptions == nil {
-		c.mailOptions = client.MailOptions{
-			Size:     int64(size),
-			SMTPUTF8: c.supportsUTF8(),
-		}
-		mailOptions = &c.mailOptions
-	}
+	mailOptions.Size = cmp.Or(mailOptions.Size, int64(size))
+	mailOptions.SMTPUTF8 = mailOptions.SMTPUTF8 || c.supportsUTF8()
 
 	// From here on every failure has to end the transaction, otherwise the next
 	// Send on this connection runs into an open transaction.
-	w, failures, err := c.prepare(from, mailOptions, rcpts, rcptsOptions, size)
+	w, failures, err := c.prepare(from, &mailOptions, rcpts, rcptsOptions, size)
 	if err != nil {
 		return nil, failures, c.abort(err)
 	}

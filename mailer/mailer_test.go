@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -643,7 +644,7 @@ func TestClient_SendMailUTF8Force(t *testing.T) {
 	_, _, err := c.SendAdvanced(
 		context.Background(),
 		from,
-		&client.MailOptions{SMTPUTF8: true},
+		client.MailOptions{SMTPUTF8: true},
 		recipients,
 		nil,
 		in,
@@ -748,4 +749,35 @@ func TestClient_SendMicrosoft(t *testing.T) {
 
 	_, _, err = c.Send(context.Background(), from, recipients, bytes.NewBuffer([]byte(eml)))
 	require.NoError(t, err)
+}
+
+func TestSendAdvancedSize(t *testing.T) {
+	var size atomic.Int64
+	be := testserver.NewBackend()
+	be.Mail = func(_ context.Context, _ string, opts *deltasmtp.MailOptions) error {
+		size.Store(opts.Size)
+		return nil
+	}
+	srv := testserver.Standard(serverTLS, server.WithBackend(be))
+	l, err := srv.Listen()
+	require.NoError(t, err)
+	go func() { _ = srv.Serve(context.Background(), l) }()
+	t.Cleanup(func() { _ = srv.Close() })
+
+	c := New(withTestServer(l.Addr().String()))
+	t.Cleanup(func() { _ = c.Terminate() })
+
+	msg := "Subject: a\r\n\r\nbody\r\n"
+	send := func(opts client.MailOptions) {
+		_, _, err := c.SendAdvanced(t.Context(), "a@example.org", opts, []string{"b@example.org"}, nil,
+			bytes.NewBufferString(msg))
+		require.NoError(t, err)
+	}
+
+	// Taken from in if not set.
+	send(client.MailOptions{})
+	assert.Equal(t, int64(len(msg)), size.Load())
+
+	send(client.MailOptions{Size: 99})
+	assert.Equal(t, int64(99), size.Load())
 }
