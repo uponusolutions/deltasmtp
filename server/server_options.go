@@ -1,6 +1,7 @@
 package server
 
 import (
+	"cmp"
 	"crypto/tls"
 	"errors"
 	"log/slog"
@@ -194,9 +195,7 @@ func New(opts ...Option) *Server {
 		o(s)
 	}
 
-	if s.logger == nil {
-		s.logger = slog.Default()
-	}
+	s.logger = cmp.Or(s.logger, slog.Default())
 
 	return s
 }

@@ -90,7 +90,7 @@ func limit(ext map[string]string, name string) (int, bool) {
 	var value string
 	found := false
 	// limits-param = limit-name-value 0*[SP limit-name-value]
-	for _, nv := range strings.Split(param, " ") {
+	for nv := range strings.SplitSeq(param, " ") {
 		n, v, hasValue := strings.Cut(nv, "=")
 		if !validLimitName(n) || (hasValue && !validLimitValue(v)) {
 			return 0, false
@@ -130,7 +130,7 @@ func validLimitValue(s string) bool {
 	if s == "" {
 		return false
 	}
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		if s[i] < 0x21 || s[i] > 0x7e || s[i] == ';' {
 			return false
 		}

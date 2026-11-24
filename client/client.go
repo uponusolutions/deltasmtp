@@ -497,16 +497,11 @@ func (c *Client) ClearResponses(x int) error {
 		return ErrPipeliningNotEnabled
 	}
 
-	if x == 0 {
-		x = c.session.pipelining.pending
-	} else if x < 0 {
-		x = c.session.pipelining.pending + x
-		if x <= 0 {
-			return nil
-		}
+	if x <= 0 {
+		x += c.session.pipelining.pending
 	}
 
-	for i := 0; i < x; i++ {
+	for range x {
 		if err := c.readResponseValid(0); err != nil {
 			return err
 		}
@@ -532,12 +527,8 @@ func (c *Client) ehlo() error {
 
 	if len(status.Lines) > 1 {
 		for _, line := range status.Lines[1:] {
-			i := strings.IndexByte(line, ' ')
-			if i < 0 {
-				ext[line] = ""
-			} else {
-				ext[line[:i]] = line[i+1:]
-			}
+			key, value, _ := strings.Cut(line, " ")
+			ext[key] = value
 		}
 	}
 	c.setExt(ext)

@@ -108,7 +108,7 @@ func TestServerBdatNoRecipientsDiscard(t *testing.T) {
 // writeSlowly writes s in parts with pauses, taking longer in total than the read timeout.
 func writeSlowly(c net.Conn, s string, parts int, pause time.Duration) {
 	step := len(s) / parts
-	for i := 0; i < parts-1; i++ {
+	for i := range parts - 1 {
 		_, _ = io.WriteString(c, s[i*step:(i+1)*step])
 		time.Sleep(pause)
 	}

@@ -3,6 +3,7 @@
 package resolve
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -23,11 +24,8 @@ type Resolver struct {
 
 // New creates a new resolver. If nil is given the net.DefaultResolver is used.
 func New(resolver LookupMX) Resolver {
-	if resolver == nil {
-		resolver = net.DefaultResolver
-	}
 	return Resolver{
-		resolver: resolver,
+		resolver: cmp.Or[LookupMX](resolver, net.DefaultResolver),
 	}
 }
 

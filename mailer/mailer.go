@@ -70,11 +70,10 @@ func (c *Mailer) Connect(ctx context.Context) error {
 func (c *Mailer) connect(ctx context.Context) error {
 	var err error
 
-	for i := 0; i < len(c.cfg.serverAddresses); i++ {
-		for p := 0; p < len(c.cfg.serverAddresses[i]); p++ {
-			// use c.serverAddressIndex
-			address := c.cfg.serverAddresses[i][(p+c.cfg.serverAddressIndex)%len(c.cfg.serverAddresses[i])]
-			err = c.connectAddress(ctx, address)
+	for _, addrs := range c.cfg.serverAddresses {
+		for p := range addrs {
+			// start at c.cfg.serverAddressIndex
+			err = c.connectAddress(ctx, addrs[(p+c.cfg.serverAddressIndex)%len(addrs)])
 			if err == nil {
 				return nil
 			}

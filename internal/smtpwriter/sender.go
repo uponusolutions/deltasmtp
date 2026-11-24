@@ -2,6 +2,7 @@ package smtpwriter
 
 import (
 	"bufio"
+	"cmp"
 	"io"
 )
 
@@ -15,9 +16,7 @@ func NewSender(
 	conn io.Writer,
 	writerSize int,
 ) *Sender {
-	if writerSize == 0 {
-		writerSize = 4096 // default
-	}
+	writerSize = cmp.Or(writerSize, 4096) // default
 
 	return &Sender{
 		Writer: bufio.NewWriterSize(conn, writerSize),

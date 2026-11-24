@@ -30,6 +30,7 @@ func NewReceiver(
 	maxLineLength int,
 	maxResponseLines int,
 ) *Receiver {
+	// No cmp.Or, it pushes NewReceiver over the inlining budget.
 	if readerSize == 0 {
 		readerSize = 4096 // default
 	}
@@ -167,18 +168,16 @@ func parseFirstCodeLine(line string) (*deltasmtp.Status, bool, error) {
 		return deltasmtp.NewStatusS(code, deltasmtp.NoEnhancedCode, message), continued, nil
 	}
 
-	index := strings.Index(message, " ")
-	if index == -1 {
+	enhPart, rest, ok := strings.Cut(message, " ")
+	if !ok {
 		return deltasmtp.NewStatusS(code, deltasmtp.NoEnhancedCode, message), continued, nil
 	}
-	enhCode, err := parseEnhancedCode(message[:index], code)
+	enhCode, err := parseEnhancedCode(enhPart, code)
 	if err != nil {
 		return deltasmtp.NewStatusS(code, deltasmtp.NoEnhancedCode, message), continued, nil
 	}
 
-	message = message[index+1:]
-
-	return deltasmtp.NewStatusS(code, enhCode, message), continued, nil
+	return deltasmtp.NewStatusS(code, enhCode, rest), continued, nil
 }
 
 func (t *Receiver) readExtraCodeLine(codeString string, enhCodePart []byte) (continued bool, message string, err error) {

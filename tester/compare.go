@@ -36,11 +36,8 @@ func getAllFilenames(fs *embed.FS, path string) (out []string, err error) {
 func chunkSlice(slice []byte, chunkSize int) [][]byte {
 	var chunks [][]byte
 	for len(slice) != 0 {
-		// necessary check to avoid slicing beyond
-		// slice capacity
-		if len(slice) < chunkSize {
-			chunkSize = len(slice)
-		}
+		// avoid slicing beyond slice capacity
+		chunkSize = min(chunkSize, len(slice))
 
 		chunks = append(chunks, slice[0:chunkSize])
 		slice = slice[chunkSize:]

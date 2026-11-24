@@ -166,11 +166,11 @@ func decodeUTF8AddrXtext(val string) (string, error) {
 }
 
 func decodeTypedAddress(val string) (deltasmtp.DSNAddressType, string, error) {
-	tv := strings.SplitN(val, ";", 2)
-	if len(tv) != 2 || tv[0] == "" || tv[1] == "" {
+	aType, aAddr, ok := strings.Cut(val, ";")
+	if !ok || aType == "" || aAddr == "" {
 		return "", "", errors.New("bad address")
 	}
-	aType, aAddr := strings.ToUpper(tv[0]), tv[1]
+	aType = strings.ToUpper(aType)
 
 	var err error
 	switch deltasmtp.DSNAddressType(aType) {

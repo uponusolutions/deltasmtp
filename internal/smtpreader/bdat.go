@@ -21,16 +21,22 @@ type bdat struct {
 // BdatArg parses the arguments of a bdat command.
 // Return smtp errors if something isn't parseable.
 func BdatArg(arg string) (int64, bool, error) {
-	args := strings.Fields(arg)
-	if len(args) == 0 {
-		return 0, true, deltasmtp.ErrBDATMissingSize
+	// An array instead of strings.Fields avoids an allocation per chunk.
+	var args [2]string
+	n := 0
+	for f := range strings.FieldsSeq(arg) {
+		if n == len(args) {
+			return 0, true, deltasmtp.ErrBDATTooManyArgs
+		}
+		args[n] = f
+		n++
 	}
-	if len(args) > 2 {
-		return 0, true, deltasmtp.ErrBDATTooManyArgs
+	if n == 0 {
+		return 0, true, deltasmtp.ErrBDATMissingSize
 	}
 
 	last := false
-	if len(args) == 2 {
+	if n == 2 {
 		if !strings.EqualFold(args[1], "LAST") {
 			return 0, true, deltasmtp.ErrBDATUnknownArg
 		}

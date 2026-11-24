@@ -308,7 +308,7 @@ func isDotString(s string) bool {
 		if atom == "" {
 			return false
 		}
-		for i := 0; i < len(atom); i++ {
+		for i := range len(atom) {
 			if !isAtext(atom[i]) {
 				return false
 			}
@@ -332,7 +332,7 @@ func quoteLocalPart(content string) string {
 	var sb strings.Builder
 	sb.Grow(len(content) + 2)
 	sb.WriteByte('"')
-	for i := 0; i < len(content); i++ {
+	for i := range len(content) {
 		if content[i] == '"' || content[i] == '\\' {
 			sb.WriteByte('\\')
 		}
@@ -388,7 +388,7 @@ func (p *Parser) addressLiteral() (string, error) {
 		return "", errors.New("malformed address-literal")
 	}
 	lit := p.S[1:end]
-	for i := 0; i < len(lit); i++ {
+	for i := range len(lit) {
 		if lit[i] < 33 || lit[i] > 126 || lit[i] == '[' || lit[i] == '\\' {
 			return "", fmt.Errorf("invalid character %q in address-literal", lit[i])
 		}
@@ -421,7 +421,7 @@ func isLdhStr(s string) bool {
 	if s == "" || s[0] == '-' || s[len(s)-1] == '-' {
 		return false
 	}
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		ch := s[i]
 		if ch >= 0x80 || ch != '-' && !isLetDig(ch) {
 			return false
@@ -433,7 +433,7 @@ func isLdhStr(s string) bool {
 // IsASCII reports whether s only contains ASCII characters. Addresses
 // containing non-ASCII characters require SMTPUTF8 (RFC 6531).
 func IsASCII(s string) bool {
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		if s[i] >= utf8.RuneSelf {
 			return false
 		}

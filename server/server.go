@@ -16,6 +16,7 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -48,14 +49,8 @@ func (s *Server) Serve(ctx context.Context, l net.Listener) error {
 			default:
 			}
 			if ne, ok := err.(net.Error); ok && ne.Timeout() {
-				if tempDelay == 0 {
-					tempDelay = 5 * time.Millisecond
-				} else {
-					tempDelay *= 2
-				}
-				if maxDelay := 1 * time.Second; tempDelay > maxDelay {
-					tempDelay = maxDelay
-				}
+				// Doubles from 5ms up to 1s.
+				tempDelay = min(max(2*tempDelay, 5*time.Millisecond), time.Second)
 				s.logger.ErrorContext(
 					ctx,
 					"accept error, retrying",
@@ -215,15 +210,8 @@ func remoteIP(conn net.Conn) string {
 //
 // If s.Addr is blank and LMTP is disabled, ":smtp" is used.
 func (s *Server) Listen() (net.Listener, error) {
-	network := s.network
-	if network == "" {
-		network = "tcp"
-	}
-
-	addr := s.addr
-	if addr == "" {
-		addr = ":smtp"
-	}
+	network := cmp.Or(s.network, "tcp")
+	addr := cmp.Or(s.addr, ":smtp")
 
 	var l net.Listener
 	var err error
@@ -246,15 +234,8 @@ func (s *Server) Listen() (net.Listener, error) {
 //
 // If s.Addr is blank and LMTP is disabled, ":smtp" is used.
 func (s *Server) ListenAndServe(ctx context.Context) error {
-	network := s.network
-	if network == "" {
-		network = "tcp"
-	}
-
-	addr := s.addr
-	if addr == "" {
-		addr = ":smtp"
-	}
+	network := cmp.Or(s.network, "tcp")
+	addr := cmp.Or(s.addr, ":smtp")
 
 	var l net.Listener
 	var err error

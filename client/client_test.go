@@ -1295,7 +1295,7 @@ func timeoutServer(t *testing.T, ext string, n int, stall func(c net.Conn, r *bu
 		_, _ = io.WriteString(c, "220 localhost ESMTP\r\n")
 		_, _ = r.ReadString('\n')
 		_, _ = io.WriteString(c, "250-localhost\r\n250 "+ext+"\r\n")
-		for i := 0; i < n; i++ {
+		for range n {
 			_, _ = r.ReadString('\n')
 			_, _ = io.WriteString(c, "250 ok\r\n")
 		}
