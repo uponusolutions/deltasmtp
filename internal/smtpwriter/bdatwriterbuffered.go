@@ -31,27 +31,24 @@ type bdatWriterBuffered struct {
 	writer   bdat
 }
 
-// ReadFrom implements io.ReadFrom.
+// ReadFrom implements io.ReaderFrom, it reads r into the buffer and sends every
+// full buffer as bdat chunk. Like Write, a full buffer is only sent once more
+// data follows, so Close can send the last one as LAST.
 func (d *bdatWriterBuffered) ReadFrom(r io.Reader) (n int64, err error) {
-	var p int
-
-	for err == nil {
-		p, err = r.Read(d.buffer[d.position:])
+	for {
+		if err = d.flushFull(); err != nil {
+			return n, err
+		}
+		p, errRead := r.Read(d.buffer[d.position:])
 		n += int64(p)
-		if p+d.position >= len(d.buffer) {
-			_, err = d.writer.Write(d.buffer)
-			d.position = 0
-		} else {
-			d.position += p
+		d.position += p
+		switch {
+		case errRead == io.EOF: // not returned, see io.Copy
+			return n, nil
+		case errRead != nil:
+			return n, errRead
 		}
 	}
-
-	// io.EOF is not returned (see io.Copy)
-	if err == io.EOF {
-		return n, nil
-	}
-
-	return n, err
 }
 
 // Write buffers b, every full buffer is sent as bdat chunk.
@@ -70,30 +67,27 @@ func (d *bdatWriterBuffered) Write(b []byte) (n int, err error) {
 	return n, err
 }
 
-func (d *bdatWriterBuffered) write(b []byte) (n int, err error) {
-	available := len(d.buffer) - d.position
-
-	if available == 0 {
-		_, err = d.writer.Write(d.buffer)
-		d.position = 0
+func (d *bdatWriterBuffered) write(b []byte) (int, error) {
+	if err := d.flushFull(); err != nil {
+		return 0, err
 	}
-
-	if len(b) > available {
-		// ignore buffer, just pass it directly
-		if d.position == 0 {
-			n, err = d.writer.Write(b)
-			return n, err
-		}
-		n = available
-		copy(d.buffer[d.position:], b[:available])
-	} else {
-		n = len(b)
-		copy(d.buffer[d.position:], b)
+	// The buffer would only be filled and sent, send b directly.
+	if d.position == 0 && len(b) > len(d.buffer) {
+		return d.writer.Write(b)
 	}
-
+	n := copy(d.buffer[d.position:], b)
 	d.position += n
+	return n, nil
+}
 
-	return n, err
+// flushFull sends the buffer as bdat chunk if it is full.
+func (d *bdatWriterBuffered) flushFull() error {
+	if d.position < len(d.buffer) {
+		return nil
+	}
+	d.position = 0
+	_, err := d.writer.Write(d.buffer)
+	return err
 }
 
 func (d *bdatWriterBuffered) Close() error {

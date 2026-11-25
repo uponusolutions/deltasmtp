@@ -198,3 +198,85 @@ func TestBdatWriterBufferedEmptyBuffer(t *testing.T) {
 		require.Equal(t, "BDAT 2\r\nabBDAT 0 LAST\r\n", buf.String())
 	}
 }
+
+// TestBdatWriterBufferedSmallWritesAfterFlush checks that a write after a full
+// buffer was sent is buffered again, not sent as its own small chunk.
+func TestBdatWriterBufferedSmallWritesAfterFlush(t *testing.T) {
+	var buf bytes.Buffer
+	d := smtpwriter.NewBdatWriterBuffered(bufio.NewWriter(&buf), func() error { return nil }, 0, make([]byte, 2))
+
+	for _, s := range []string{"a", "b", "c", "d", "e"} {
+		n, err := d.Write([]byte(s))
+		require.NoError(t, err)
+		require.Equal(t, 1, n)
+	}
+	require.NoError(t, d.Close())
+
+	require.Equal(t, "BDAT 2\r\nabBDAT 2\r\ncdBDAT 1 LAST\r\ne", buf.String())
+}
+
+// TestBdatWriterBufferedFlushError checks that Write returns the error of
+// sending the full buffer, instead of carrying on with the next chunk.
+func TestBdatWriterBufferedFlushError(t *testing.T) {
+	errRejected := errors.New("chunk rejected")
+	reads := 0
+	read := func() error {
+		reads++
+		if reads == 1 {
+			return errRejected
+		}
+		return nil
+	}
+
+	var buf bytes.Buffer
+	d := smtpwriter.NewBdatWriterBuffered(bufio.NewWriter(&buf), read, 0, make([]byte, 2))
+
+	n, err := d.Write([]byte("ab"))
+	require.NoError(t, err)
+	require.Equal(t, 2, n)
+
+	n, err = d.Write([]byte("c"))
+	require.ErrorIs(t, err, errRejected)
+	require.Equal(t, 0, n)
+}
+
+// fillErrReader returns its data and err in the same Read, then io.EOF.
+type fillErrReader struct {
+	data []byte
+	err  error
+}
+
+func (r *fillErrReader) Read(p []byte) (int, error) {
+	n := copy(p, r.data)
+	r.data = r.data[n:]
+	err := r.err
+	r.err = io.EOF
+	return n, err
+}
+
+// TestBdatWriterReaderFromError checks that ReadFrom returns an error the reader
+// returns together with data that fills the buffer.
+func TestBdatWriterReaderFromError(t *testing.T) {
+	errRead := errors.New("read failed")
+
+	var buf bytes.Buffer
+	d := smtpwriter.NewBdatWriterBuffered(bufio.NewWriter(&buf), func() error { return nil }, 0, make([]byte, 2))
+
+	n, err := d.(io.ReaderFrom).ReadFrom(&fillErrReader{data: []byte("ab"), err: errRead})
+	require.ErrorIs(t, err, errRead)
+	require.Equal(t, int64(2), n)
+}
+
+// TestBdatWriterReaderFromEOFWithData checks that a reader returning io.EOF
+// with the data filling the buffer gets the buffer sent as LAST by Close.
+func TestBdatWriterReaderFromEOFWithData(t *testing.T) {
+	var buf bytes.Buffer
+	d := smtpwriter.NewBdatWriterBuffered(bufio.NewWriter(&buf), func() error { return nil }, 0, make([]byte, 2))
+
+	n, err := d.(io.ReaderFrom).ReadFrom(&fillErrReader{data: []byte("ab"), err: io.EOF})
+	require.NoError(t, err)
+	require.Equal(t, int64(2), n)
+	require.NoError(t, d.Close())
+
+	require.Equal(t, "BDAT 2 LAST\r\nab", buf.String())
+}
