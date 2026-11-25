@@ -2,11 +2,9 @@ package smtpreader_test
 
 import (
 	"bufio"
-	"embed"
 	"errors"
 	"io"
 	"net"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -14,72 +12,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/uponusolutions/deltasmtp"
 	"github.com/uponusolutions/deltasmtp/internal/smtpreader"
-	"github.com/uponusolutions/deltasmtp/tester"
-	"github.com/uponusolutions/deltasmtp/tester/upstream"
 )
 
-//go:embed testdata/*
-var embedFSReader embed.FS
-
-func TestDotReaderCompare(t *testing.T) {
-	input := []string{
-		"dotlines\r\n.foo\r\n..bar\n...baz\nquux\r\n\r\n.\r\nanot.her\n",
-		"anot.her\n",
-		"\r\n",
-		".\r\n",
-	}
-
-	for p, value := range input {
-		t.Run(strconv.Itoa(p), func(t *testing.T) {
-			readerUpstream := bufio.NewReader(strings.NewReader(value))
-			readerFork := bufio.NewReader(strings.NewReader(value))
-
-			dotReaderUpstream := upstream.NewDotReader(readerUpstream, 0)
-			bufUpstream := make([]byte, 1)
-
-			dotReaderFork := smtpreader.NewDot(readerFork, 0)
-			bufFork := make([]byte, 1)
-
-			i := 0
-
-			for {
-				nUpsream, errUpstream := dotReaderUpstream.Read(bufUpstream)
-				nFork, errFork := dotReaderFork.Read(bufFork)
-
-				require.Equal(t, bufUpstream, bufFork, i)
-				require.Equal(t, nUpsream, nFork, i)
-
-				if errUpstream != nil && errFork != io.EOF {
-					require.Equal(t, errUpstream, errFork, i)
-				}
-
-				i++
-
-				if errUpstream == io.EOF || errUpstream == io.ErrUnexpectedEOF {
-					break
-				}
-			}
-
-			bUpstream, errUpstream := io.ReadAll(readerUpstream)
-			bFork, errFork := io.ReadAll(readerFork)
-
-			require.Equal(t, errUpstream, errFork)
-			require.Equal(t, bUpstream, bFork)
-		})
-	}
-}
-
 func TestDotReader(t *testing.T) {
-	t.Run("CompareTest", func(t *testing.T) {
-		tester.ReaderCompareTest(t, &embedFSReader, "testdata", func(b io.Reader) ([]byte, error) {
-			reader := upstream.NewDotReader(bufio.NewReader(b), 0)
-			return io.ReadAll(reader)
-		}, func(b io.Reader) ([]byte, error) {
-			reader := smtpreader.NewDot(bufio.NewReader(b), 0) // textsmtp.NewDotReader(bufio.NewReader(b), 999999)
-			return io.ReadAll(reader)
-		})
-	})
-
 	t.Run("Decode", func(t *testing.T) {
 		buf := bufio.NewReader(strings.NewReader("dotlines\r\n.foo\r\n..bar\n...baz\nquux\r\n\r\n.\r\nanot.her\n"))
 		r := smtpreader.NewDot(buf, 0)

@@ -9,10 +9,10 @@ import (
 	upstreamtextproto "net/textproto"
 	"testing"
 
+	"github.com/uponusolutions/deltasmtp/benchmark/internal/upstream"
 	"github.com/uponusolutions/deltasmtp/internal/smtpreader"
 	"github.com/uponusolutions/deltasmtp/internal/smtpwriter"
 	"github.com/uponusolutions/deltasmtp/tester"
-	"github.com/uponusolutions/deltasmtp/tester/upstream"
 )
 
 // payloadSize is used for both directions so read and write throughput are

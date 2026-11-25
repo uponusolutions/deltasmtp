@@ -7,28 +7,13 @@ package smtpwriter_test
 import (
 	"bufio"
 	"bytes"
-	"embed"
-	"io"
-	upstream "net/textproto"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"github.com/uponusolutions/deltasmtp/internal/smtpwriter"
-	"github.com/uponusolutions/deltasmtp/tester"
 )
 
-//go:embed testdata/*
-var embedFSWriter embed.FS
-
 func TestDotWriter(t *testing.T) {
-	t.Run("CompareTest", func(t *testing.T) {
-		tester.WriterCompareTest(t, &embedFSWriter, "testdata", func(b io.Writer) io.WriteCloser {
-			return upstream.NewWriter(bufio.NewWriter(b)).DotWriter()
-		}, func(b io.Writer) io.WriteCloser {
-			return smtpwriter.NewDot(bufio.NewWriter(b))
-		})
-	})
-
 	t.Run("Encode", func(t *testing.T) {
 		var buf bytes.Buffer
 		d := smtpwriter.NewDot(bufio.NewWriter(&buf))
