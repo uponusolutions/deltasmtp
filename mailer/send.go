@@ -1,13 +1,9 @@
 package mailer
 
 import (
-	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"io"
-	"strings"
-	"sync"
 
 	"github.com/uponusolutions/deltasmtp"
 	"github.com/uponusolutions/deltasmtp/client"
@@ -26,6 +22,7 @@ type Report struct {
 }
 
 // Response contains the response of a smtp server for specific recipients.
+// Rcpts may share the backing array of the recipients passed to send.
 type Response struct {
 	Status *deltasmtp.Status
 	Rcpts  []string
@@ -47,28 +44,6 @@ type Response struct {
 // Only these exact types are accepted, convert named types at the call site.
 type Message interface {
 	string | []byte | func() io.Reader | func() (io.ReadCloser, error)
-}
-
-// opener returns a function opening a reader of msg.
-func opener[M Message](msg M) func() (io.Reader, error) {
-	switch m := any(msg).(type) {
-	case string:
-		return func() (io.Reader, error) { return strings.NewReader(m), nil }
-	case []byte:
-		return func() (io.Reader, error) { return bytes.NewReader(m), nil }
-	case func() io.Reader:
-		return func() (io.Reader, error) { return m(), nil }
-	case func() (io.ReadCloser, error):
-		return func() (io.Reader, error) {
-			r, err := m()
-			if err != nil {
-				return nil, fmt.Errorf("mailer: open message: %w", err)
-			}
-			return r, nil
-		}
-	default:
-		panic("unreachable")
-	}
 }
 
 // Send sends msg from from to rcpts, see SendAdvanced.
@@ -106,15 +81,17 @@ func (c *Mailer) SendAdvanced[M Message](
 		return res.fail(rcpts, nil, ErrVerifying)
 	}
 
-	open := opener(msg)
-
 	for len(rcpts) > 0 {
 		if err := c.ready(ctx); err != nil {
 			return res.fail(rcpts, nil, err)
 		}
 
-		t := &transaction{c: c, rcpts: rcpts}
-		status, err := t.send(from, mailOptions, rcptsOptions, open)
+		body, err := open(msg)
+		if err != nil {
+			return res.fail(rcpts, nil, err)
+		}
+		t := transaction{c: c, rcpts: rcpts}
+		status, err := t.send(from, mailOptions, rcptsOptions, body)
 		res.Failures = append(res.Failures, t.failures...)
 
 		switch {
@@ -139,15 +116,13 @@ func (t *transaction) remaining(all []string, opts []*deltasmtp.RcptOptions) ([]
 	if len(t.deferred) == 0 {
 		return all[n:], opts[min(n, len(opts)):]
 	}
-	idx := t.deferred
-	for i := n; i < len(all); i++ {
-		idx = append(idx, i)
+	rcpts := make([]string, 0, len(t.deferred)+len(all)-n)
+	rcptsOpts := make([]*deltasmtp.RcptOptions, 0, cap(rcpts))
+	for _, i := range t.deferred {
+		rcpts, rcptsOpts = append(rcpts, all[i]), append(rcptsOpts, rcptOption(opts, i))
 	}
-	rcpts, rcptsOpts := make([]string, len(idx)), make([]*deltasmtp.RcptOptions, len(idx))
-	for j, i := range idx {
-		rcpts[j], rcptsOpts[j] = all[i], rcptOption(opts, i)
-	}
-	return rcpts, rcptsOpts
+	// opts may be shorter than all, the missing options are nil either way.
+	return append(rcpts, all[n:]...), append(rcptsOpts, opts[min(n, len(opts)):]...)
 }
 
 // fail adds rcpts, without the ones in failures, as failure with err.
@@ -222,15 +197,4 @@ func acceptedRcpts(rcpts []string, failures []resolve.Failure) []string {
 		}
 	}
 	return accepted
-}
-
-// copyBuffers avoids that io.Copy allocates 32 KB for every message.
-var copyBuffers sync.Pool
-
-func getCopyBuffer() *[]byte {
-	if b, ok := copyBuffers.Get().(*[]byte); ok {
-		return b
-	}
-	b := make([]byte, 32*1024)
-	return &b
 }

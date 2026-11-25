@@ -36,7 +36,7 @@ func NewConfig(opts ...Option) Config {
 	return cfg
 }
 
-// Security describes how the connection is etablished.
+// Security describes how the connection is established.
 type Security int32
 
 const (
@@ -110,7 +110,8 @@ func WithServerAddressesPrio(addrs ...[]string) Option {
 	}
 }
 
-// WithServerAddressIndex sets the SMTP server index.
+// WithServerAddressIndex sets the index of the first server address tried in each
+// priority group, the following ones are tried in order, wrapping around. Defaults to 0.
 func WithServerAddressIndex(index int) Option {
 	return func(c *Config) {
 		c.extra.serverAddressIndex = index

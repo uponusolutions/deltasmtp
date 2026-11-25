@@ -3,7 +3,6 @@ package mailer
 import (
 	"cmp"
 	"errors"
-	"io"
 
 	"github.com/uponusolutions/deltasmtp"
 	"github.com/uponusolutions/deltasmtp/client"
@@ -23,25 +22,16 @@ type transaction struct {
 	next int
 }
 
-// send sends the message returned by open. A nil status without an error means every
+// send sends msg and closes it. A nil status without an error means every
 // recipient was rejected, the connection may be closed then (e.g. Postfix's error limit),
 // the next transaction connects again. On an error the transaction is ended or the
 // connection closed, errRenew asks to send it on a new connection.
 func (t *transaction) send(from string, opts client.MailOptions, rcptsOptions []*deltasmtp.RcptOptions,
-	open func() (io.Reader, error),
+	msg content,
 ) (*deltasmtp.Status, error) {
 	c := t.c
-	in, err := open()
-	if err != nil {
-		return nil, err
-	}
-	if closer, ok := in.(io.Closer); ok {
-		defer func() { _ = closer.Close() }()
-	}
-	size := 0
-	if l, ok := in.(Len); ok {
-		size = l.Len()
-	}
+	defer msg.close()
+	size := msg.size()
 	opts.Size = cmp.Or(opts.Size, int64(size))
 	opts.SMTPUTF8 = opts.SMTPUTF8 || c.supportsUTF8()
 
@@ -55,12 +45,9 @@ func (t *transaction) send(from string, opts client.MailOptions, rcptsOptions []
 		return nil, nil
 	}
 
-	buf := getCopyBuffer()
-	_, err = io.CopyBuffer(w.Writer(), in, *buf)
-	copyBuffers.Put(buf)
-	if err != nil {
+	if err = msg.writeTo(w.Writer()); err != nil {
 		// Partly sent, the connection can't be reused. A rejected BDAT chunk would leave it
-		// in sync, but can't be told apart from a *deltasmtp.Status returned by in.
+		// in sync, but can't be told apart from a *deltasmtp.Status returned by a reader.
 		return nil, errors.Join(err, c.client.Close())
 	}
 
@@ -176,6 +163,8 @@ func (t *transaction) flush(end int) error {
 // rejection are returned.
 func (t *transaction) rcptResult(i int, err error) error {
 	switch {
+	case err == nil && len(t.accepted) == i: // none rejected yet, no need to copy
+		t.accepted = t.rcpts[: i+1 : i+1]
 	case err == nil:
 		t.accepted = append(t.accepted, t.rcpts[i])
 	case !isRejection(err):

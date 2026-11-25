@@ -56,10 +56,18 @@ func (c *Mailer) Connect(ctx context.Context) error {
 	return c.connect(ctx)
 }
 
-func (c *Mailer) connect(ctx context.Context) (err error) {
+// errNoServerAddress is returned by connect without a server address.
+var errNoServerAddress = errors.New("smtp: no server address")
+
+func (c *Mailer) connect(ctx context.Context) error {
+	err := errNoServerAddress
 	for _, addrs := range c.cfg.serverAddresses {
 		for p := range addrs {
-			if err = c.connectAddress(ctx, addrs[(p+c.cfg.serverAddressIndex)%len(addrs)]); err == nil {
+			i := (p + c.cfg.serverAddressIndex) % len(addrs)
+			if i < 0 { // a negative index counts from the end
+				i += len(addrs)
+			}
+			if err = c.connectAddress(ctx, addrs[i]); err == nil {
 				return nil
 			}
 		}
@@ -135,7 +143,7 @@ func (c *Mailer) Terminate() error {
 	return c.client.Close()
 }
 
-// Connected returns the current server name.
+// Connected reports whether c has a connection.
 func (c *Mailer) Connected() bool {
 	return c.client.Connected()
 }
@@ -168,8 +176,8 @@ var errRenew = errors.New("smtp: transaction limit of the connection reached")
 // after earlier transactions: a server may limit them without MAILMAX (e.g. Exim). The
 // limit isn't learned, the 421 may have another reason.
 func (c *Mailer) mailError(err error) error {
-	var st *deltasmtp.Status
-	if c.transactions > 1 && errors.As(err, &st) && st.Code == 421 {
+	// Not errors.As, it would allocate st for every MAIL.
+	if st, ok := errors.AsType[*deltasmtp.Status](err); ok && st.Code == 421 && c.transactions > 1 {
 		return errRenew
 	}
 	return err

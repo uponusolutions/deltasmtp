@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -30,7 +31,8 @@ func (c closeCounter) Close() error {
 // The string and []byte are announced with SIZE, a reader without Len isn't.
 // Readers implementing io.Closer are closed after the transaction.
 func TestSendMessageTypes(t *testing.T) {
-	const msg = "Subject: a\r\n\r\nbody\r\n"
+	// Larger than the copy buffer, a string is written in several parts.
+	msg := "Subject: a\r\n\r\n" + strings.Repeat("body\r\n", 10000)
 
 	from := "alice@example.org"
 	rcpts := []string{"bob@example.org", "carol@example.org"}
@@ -155,4 +157,29 @@ func TestSendOpenError(t *testing.T) {
 
 	_, found := testserver.GetBackend(s[0]).Load(from, rcpts)
 	assert.False(t, found, "nothing must be sent")
+}
+
+// TestConnectNoServerAddress checks that connecting without a server address
+// fails instead of leaving the Mailer unconnected without an error.
+func TestConnectNoServerAddress(t *testing.T) {
+	m := New()
+	require.ErrorIs(t, m.Connect(t.Context()), errNoServerAddress)
+	assert.False(t, m.Connected())
+
+	_, err := m.Send(t.Context(), "alice@example.org", []string{"bob@example.org"}, "Subject: a\r\n\r\n")
+	require.ErrorIs(t, err, errNoServerAddress)
+}
+
+// TestConnectNegativeServerAddressIndex checks that a negative index counts from
+// the end of the server addresses.
+func TestConnectNegativeServerAddressIndex(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	refused := l.Addr().String()
+	require.NoError(t, l.Close())
+
+	m := New(withTestServer(refused, addr[0]), WithServerAddressIndex(-1))
+	require.NoError(t, m.Connect(t.Context()))
+	t.Cleanup(func() { _ = m.Disconnect() })
+	assert.Equal(t, addr[0], m.ServerAddress())
 }

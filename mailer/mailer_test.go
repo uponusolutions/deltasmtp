@@ -469,6 +469,9 @@ func TestClient_SendMailPartiallyRejectedKeepsPerRcptFailures(t *testing.T) {
 			require.Len(t, res.Responses, 1)
 			assert.Equal(t, accepted, res.Responses[0].Rcpts,
 				"delivered recipients must exclude the rejected one")
+			// The accepted recipients share rcpts until the rejected one.
+			assert.Equal(t, []string{accepted[0], rejected, accepted[1]}, rcpts,
+				"the recipients of the caller must not be modified")
 		})
 	}
 }
