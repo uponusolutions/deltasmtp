@@ -6,42 +6,38 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/uponusolutions/deltasmtp/mailer"
 )
 
 func TestClient_Multireader(t *testing.T) {
-	a := bytes.NewBuffer([]byte{'a', 'b'})
-	b := bytes.NewBuffer([]byte{'c'})
-	c := bytes.NewBuffer([]byte{'d'})
-
-	res := mailer.NewMultiReader(a, b, c)
-
+	res := mailer.NewMultiReader(bytes.NewBufferString("ab"), bytes.NewBufferString("c"), bytes.NewBufferString("d"))
 	require.Equal(t, 4, res.Len())
 
-	bytes := make([]byte, 1)
-	i, err := res.Read(bytes)
-	require.Equal(t, i, 1)
-	require.Equal(t, bytes, []byte{'a'})
+	buf := make([]byte, 1)
+	n, err := res.Read(buf)
 	require.NoError(t, err)
+	require.Equal(t, 1, n)
+	require.Equal(t, []byte("a"), buf)
 	require.Equal(t, 3, res.Len())
 
-	bytes = make([]byte, 2)
-	i, err = res.Read(bytes)
+	buf = make([]byte, 2)
+	n, err = res.Read(buf)
 	require.NoError(t, err)
-	require.Equal(t, i, 1)
+	require.Equal(t, 1, n)
 	require.Equal(t, 2, res.Len())
-	i, err = res.Read(bytes[1:])
+	n, err = res.Read(buf[1:])
 	require.NoError(t, err)
-	require.Equal(t, i, 1)
-	require.Equal(t, bytes, []byte{'b', 'c'})
+	require.Equal(t, 1, n)
+	require.Equal(t, []byte("bc"), buf)
 	require.Equal(t, 1, res.Len())
 
-	bytes = make([]byte, 1)
-	i, err = res.Read(bytes)
-	require.Equal(t, i, 1)
-	require.Equal(t, bytes, []byte{'d'})
+	buf = make([]byte, 1)
+	n, err = res.Read(buf)
 	require.NoError(t, err)
+	require.Equal(t, 1, n)
+	require.Equal(t, []byte("d"), buf)
 	require.Equal(t, 0, res.Len())
 }
 
@@ -61,19 +57,9 @@ func TestMultiReader(t *testing.T) {
 	expectRead := func(size int, expected string, eerr error) {
 		nread++
 		n, gerr := mr.Read(buf[0:size])
-		if n != len(expected) {
-			t.Errorf("#%d, expected %d bytes; got %d",
-				nread, len(expected), n)
-		}
-		got := string(buf[0:n])
-		if got != expected {
-			t.Errorf("#%d, expected %q; got %q",
-				nread, expected, got)
-		}
-		if gerr != eerr {
-			t.Errorf("#%d, expected error %v; got %v",
-				nread, eerr, gerr)
-		}
+		assert.Equal(t, len(expected), n, "#%d", nread)
+		assert.Equal(t, expected, string(buf[0:n]), "#%d", nread)
+		assert.Equal(t, eerr, gerr, "#%d", nread)
 		buf = buf[n:]
 	}
 	withFooBar(func() {
@@ -103,18 +89,10 @@ func TestMultiReaderAsWriterTo(t *testing.T) {
 		),
 	)
 	mrAsWriterTo, ok := mr.(io.WriterTo)
-	if !ok {
-		t.Fatal("expected cast to WriterTo to succeed")
-	}
+	require.True(t, ok, "expected cast to WriterTo to succeed")
 	sink := &strings.Builder{}
 	n, err := mrAsWriterTo.WriteTo(sink)
-	if err != nil {
-		t.Fatalf("expected no error; got %v", err)
-	}
-	if n != 7 {
-		t.Errorf("expected read 7 bytes; got %d", n)
-	}
-	if result := sink.String(); result != "foo bar" {
-		t.Errorf(`expected "foo bar"; got %q`, result)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, int64(7), n)
+	assert.Equal(t, "foo bar", sink.String())
 }

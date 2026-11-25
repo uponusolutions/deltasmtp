@@ -152,7 +152,7 @@ func (r *randomServer) checkFailure(t *testing.T, f resolve.Failure) {
 			assert.ErrorContains(t, f.Error, "452", rcpt)
 			assert.False(t, r.deferrable[rcpt], "%s not deferred", rcpt)
 		default:
-			t.Errorf("%s failed: %v", rcpt, f.Error)
+			assert.Failf(t, "unexpected failure", "%s failed: %v", rcpt, f.Error)
 		}
 	}
 }

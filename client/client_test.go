@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/uponusolutions/deltasmtp"
 	"github.com/uponusolutions/deltasmtp/internal/smtpreader"
@@ -27,22 +28,25 @@ import (
 	"github.com/uponusolutions/go-sasl"
 )
 
+// crlf replaces the line endings of s with CRLF.
+func crlf(s string) string { return strings.ReplaceAll(s, "\n", "\r\n") }
+
+// fakeClient returns a client on a fake connection that reads server and the
+// buffer the client writes to.
+func fakeClient(server string, opts ...Option) (*Client, *bytes.Buffer) {
+	wrote := &bytes.Buffer{}
+	c := New(opts...)
+	c.setConn(tester.NewFakeConn(server, wrote))
+	return c, wrote
+}
+
 // Don't send a trailing space on AUTH command when there's no initial response:
 // https://github.com/golang/go/issues/17794
 func TestClientAuthTrimSpace(t *testing.T) {
-	server := "334 notbase64\r\n" +
-		"501 5.0.0 Negotiation cancelled"
-	wrote := &bytes.Buffer{}
-
-	fake := tester.NewFakeConn(server, wrote)
-
-	c := New()
-	c.setConn(fake)
+	c, wrote := fakeClient("334 notbase64\r\n501 5.0.0 Negotiation cancelled")
 	require.Error(t, c.Auth(toServerNoRespAuth{}))
 	require.NoError(t, c.Close())
-	if got, want := wrote.String(), "AUTH FOOAUTH\r\n*\r\n"; got != want {
-		t.Errorf("wrote %q; want %q", got, want)
-	}
+	require.Equal(t, "AUTH FOOAUTH\r\n*\r\n", wrote.String())
 }
 
 // toServerNoRespAuth is an implementation of Auth that only implements
@@ -60,11 +64,8 @@ func (toServerNoRespAuth) Next(_ []byte) (toServer []byte, err error) {
 }
 
 func TestBasic(t *testing.T) {
-	server := strings.Join(strings.Split(basicServer, "\n"), "\r\n")
-	client := strings.Join(strings.Split(basicClient, "\n"), "\r\n")
-
 	cmdbuf := &bytes.Buffer{}
-	fake := tester.NewFakeConn(server, cmdbuf)
+	fake := tester.NewFakeConn(crlf(basicServer), cmdbuf)
 
 	c := &Client{
 		session:  session{conn: fake},
@@ -75,60 +76,35 @@ func TestBasic(t *testing.T) {
 		},
 	}
 
-	if err := c.helo(); err != nil {
-		t.Fatalf("HELO failed: %s", err)
-	}
-	if err := c.ehlo(); err == nil {
-		t.Fatal("Expected first EHLO to fail")
-	}
-	if err := c.ehlo(); err != nil {
-		t.Fatalf("Second EHLO failed: %s", err)
-	}
+	require.NoError(t, c.helo())
+	require.Error(t, c.ehlo(), "expected first EHLO to fail")
+	require.NoError(t, c.ehlo())
 
-	if ok, args := c.Extension("aUtH"); !ok || args != "LOGIN PLAIN" {
-		t.Fatal("Expected AUTH supported")
-	}
-	if ok, _ := c.Extension("DSN"); ok {
-		t.Fatal("Shouldn't support DSN")
-	}
-	if !c.SupportsAuth("PLAIN") {
-		t.Error("Expected AUTH PLAIN supported")
-	}
-	if size, ok := c.MaxMessageSize(); !ok {
-		t.Error("Expected SIZE supported")
-	} else if size != 35651584 {
-		t.Errorf("Expected SIZE=35651584, got %v", size)
-	}
+	ok, args := c.Extension("aUtH")
+	require.True(t, ok, "expected AUTH supported")
+	require.Equal(t, "LOGIN PLAIN", args)
+	ok, _ = c.Extension("DSN")
+	require.False(t, ok, "shouldn't support DSN")
+	require.True(t, c.SupportsAuth("PLAIN"))
+	size, ok := c.MaxMessageSize()
+	require.True(t, ok, "expected SIZE supported")
+	require.Equal(t, 35651584, size)
 
-	if err := c.Mail("user@gmail.com", nil); err == nil {
-		t.Fatal("MAIL should require authentication")
-	}
+	require.Error(t, c.Mail("user@gmail.com", nil), "MAIL should require authentication")
 
-	if err := c.Verify("user1@gmail.com", nil); err == nil {
-		t.Fatal("First VRFY: expected no verification")
-	}
+	require.Error(t, c.Verify("user1@gmail.com", nil), "first VRFY: expected no verification")
 	err := c.Verify("user2@gmail.com>\r\nDATA\r\nAnother injected message body\r\n.\r\nQUIT\r\n", nil)
 	require.ErrorIs(t, err, ErrRefused, "VRFY should have failed due to a message injection attempt")
-	if err := c.Verify("user2@gmail.com", nil); err != nil {
-		t.Fatalf("Second VRFY: expected verification, got %s", err)
-	}
+	require.NoError(t, c.Verify("user2@gmail.com", nil))
 
-	if err := c.Auth(sasl.NewPlainClient("", "user", "pass")); err != nil {
-		t.Fatalf("AUTH failed: %s", err)
-	}
+	require.NoError(t, c.Auth(sasl.NewPlainClient("", "user", "pass")))
 
-	if err := c.Rcpt("golang-nuts@googlegroups.com>\r\nDATA\r\nInjected message body\r\n.\r\nQUIT\r\n", nil); err == nil {
-		t.Fatal("RCPT should have failed due to a message injection attempt")
-	}
-	if err := c.Mail("user@gmail.com>\r\nDATA\r\nAnother injected message body\r\n.\r\nQUIT\r\n", nil); err == nil {
-		t.Fatal("MAIL should have failed due to a message injection attempt")
-	}
-	if err := c.Mail("user@gmail.com", nil); err != nil {
-		t.Fatalf("MAIL failed: %s", err)
-	}
-	if err := c.Rcpt("golang-nuts@googlegroups.com", nil); err != nil {
-		t.Fatalf("RCPT failed: %s", err)
-	}
+	require.Error(t, c.Rcpt("golang-nuts@googlegroups.com>\r\nDATA\r\nInjected message body\r\n.\r\nQUIT\r\n", nil),
+		"RCPT should have failed due to a message injection attempt")
+	require.Error(t, c.Mail("user@gmail.com>\r\nDATA\r\nAnother injected message body\r\n.\r\nQUIT\r\n", nil),
+		"MAIL should have failed due to a message injection attempt")
+	require.NoError(t, c.Mail("user@gmail.com", nil))
+	require.NoError(t, c.Rcpt("golang-nuts@googlegroups.com", nil))
 	msg := `From: user@gmail.com
 To: golang-nuts@googlegroups.com
 Subject: Hooray for Go
@@ -137,97 +113,44 @@ Line 1
 .Leading dot line .
 Goodbye.`
 	w, err := c.Data()
-	if err != nil {
-		t.Fatalf("DATA failed: %s", err)
-	}
-	if _, err := w.Write([]byte(msg)); err != nil {
-		t.Fatalf("Data write failed: %s", err)
-	}
-	if err := w.Close(); err != nil {
-		t.Fatalf("Bad data response: %s", err)
-	}
+	require.NoError(t, err)
+	_, err = w.Write([]byte(msg))
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
+	require.NoError(t, c.Quit())
 
-	if err := c.Quit(); err != nil {
-		t.Fatalf("QUIT failed: %s", err)
-	}
-
-	actualcmds := cmdbuf.String()
-	if client != actualcmds {
-		t.Fatalf("Got:\n%s\nExpected:\n%s", actualcmds, client)
-	}
+	require.Equal(t, crlf(basicClient), cmdbuf.String())
 }
 
 func TestBasic_smtp(t *testing.T) {
-	faultyServer := `220 mx.google.com at your service
+	// RFC 2034 says that enhanced codes *SHOULD* be included in errors,
+	// this means it can be violated hence we need to handle last
+	// case properly.
+	c, _ := fakeClient(crlf(`220 mx.google.com at your service
 250-mx.google.com at your service
 250 ENHANCEDSTATUSCODES
 500 5.0.0 Failing with enhanced code
 500 Failing without enhanced code
 500-5.0.0 Failing with multiline and enhanced code
 500 5.0.0 ... still failing
-`
-	// RFC 2034 says that enhanced codes *SHOULD* be included in errors,
-	// this means it can be violated hence we need to handle last
-	// case properly.
-
-	faultyServer = strings.Join(strings.Split(faultyServer, "\n"), "\r\n")
-
-	wrote := &bytes.Buffer{}
-	fake := tester.NewFakeConn(faultyServer, wrote)
-
-	c := New()
-	c.setConn(fake)
+`))
 
 	require.NoError(t, c.greet())
 	require.NoError(t, c.Hello())
 
-	err := c.Mail("whatever", nil)
-	if err == nil {
-		t.Fatal("MAIL succeeded")
-	}
-	smtpErr, ok := err.(*deltasmtp.Status)
-	if !ok {
-		t.Fatal("Returned error is not smtp")
-	}
-	if smtpErr.Code != 500 {
-		t.Fatalf("Wrong status code, got %d, want %d", smtpErr.Code, 500)
-	}
-	if smtpErr.EnhancedCode != (deltasmtp.EnhancedCode{5, 0, 0}) {
-		t.Fatalf("Wrong enhanced code, got %v, want %v", smtpErr.EnhancedCode, deltasmtp.EnhancedCode{5, 0, 0})
-	}
-	if smtpErr.Lines[0] != "Failing with enhanced code" {
-		t.Fatalf("Wrong message, got %s, want %s", smtpErr.Lines, "Failing with enhanced code")
-	}
+	var smtpErr *deltasmtp.Status
+	require.ErrorAs(t, c.Mail("whatever", nil), &smtpErr)
+	require.Equal(t, 500, smtpErr.Code)
+	require.Equal(t, deltasmtp.EnhancedCode{5, 0, 0}, smtpErr.EnhancedCode)
+	require.Equal(t, "Failing with enhanced code", smtpErr.Lines[0])
 
-	err = c.Mail("whatever", nil)
-	if err == nil {
-		t.Fatal("MAIL succeeded")
-	}
-	smtpErr, ok = err.(*deltasmtp.Status)
-	if !ok {
-		t.Fatal("Returned error is not smtp")
-	}
-	if smtpErr.Code != 500 {
-		t.Fatalf("Wrong status code, got %d, want %d", smtpErr.Code, 500)
-	}
-	if smtpErr.Lines[0] != "Failing without enhanced code" {
-		t.Fatalf("Wrong message, got %s, want %s", smtpErr.Lines[0], "Failing without enhanced code")
-	}
+	require.ErrorAs(t, c.Mail("whatever", nil), &smtpErr)
+	require.Equal(t, 500, smtpErr.Code)
+	require.Equal(t, "Failing without enhanced code", smtpErr.Lines[0])
 
-	err = c.Mail("whatever", nil)
-	if err == nil {
-		t.Fatal("MAIL succeeded")
-	}
-	smtpErr, ok = err.(*deltasmtp.Status)
-	if !ok {
-		t.Fatal("Returned error is not smtp")
-	}
-	if smtpErr.Code != 500 {
-		t.Fatalf("Wrong status code, got %d, want %d", smtpErr.Code, 500)
-	}
-	if want := "Failing with multiline and enhanced code\n... still failing"; strings.Join(smtpErr.Lines, "\n") != want {
-		t.Fatalf("Wrong message, got %s, want %s", strings.Join(smtpErr.Lines, "\n"), want)
-	}
+	require.ErrorAs(t, c.Mail("whatever", nil), &smtpErr)
+	require.Equal(t, 500, smtpErr.Code)
+	require.Equal(t, []string{"Failing with multiline and enhanced code", "... still failing"}, smtpErr.Lines)
 }
 
 func TestClient_TooLongLine(t *testing.T) {
@@ -295,24 +218,17 @@ func TestClient_TooLongLine(t *testing.T) {
 	go func() {
 		for _, l := range faultyServer {
 			_, err := pw.Write([]byte(l))
-			require.NoError(t, err)
+			assert.NoError(t, err)
 		}
-		require.NoError(t, pw.Close())
+		assert.NoError(t, pw.Close())
 	}()
 
-	wrote := &bytes.Buffer{}
-	fake := tester.NewFakeConnStream(pr, wrote)
-
 	c := New()
-	c.setConn(fake)
+	c.setConn(tester.NewFakeConnStream(pr, &bytes.Buffer{}))
 
 	require.NoError(t, c.greet())
 	require.NoError(t, c.Hello())
-
-	err := c.Mail("whatever", nil)
-	if err != deltasmtp.ErrTooLongLine {
-		t.Fatal("MAIL succeeded or returned a different error:", err)
-	}
+	require.ErrorIs(t, c.Mail("whatever", nil), deltasmtp.ErrTooLongLine)
 
 	// The rest of the line is still unread, the connection is closed.
 	require.False(t, c.Connected())
@@ -364,167 +280,102 @@ QUIT
 `
 
 func TestNewClient(t *testing.T) {
-	server := strings.Join(strings.Split(newClientServer, "\n"), "\r\n")
-	client := strings.Join(strings.Split(newClientClient, "\n"), "\r\n")
-
-	cmdbuf := &bytes.Buffer{}
-	fake := tester.NewFakeConnStream(strings.NewReader(server), cmdbuf)
-
-	c := New()
-	c.setConn(fake)
-	defer func() { _ = c.Close() }()
-
-	require.NoError(t, c.greet())
-	require.NoError(t, c.Hello())
-
-	if ok, args := c.Extension("aUtH"); !ok || args != "LOGIN PLAIN" {
-		t.Fatal("Expected AUTH supported")
-	}
-	if ok, _ := c.Extension("DSN"); ok {
-		t.Fatal("Shouldn't support DSN")
-	}
-	if err := c.Quit(); err != nil {
-		t.Fatalf("QUIT failed: %s", err)
-	}
-
-	actualcmds := cmdbuf.String()
-	if client != actualcmds {
-		t.Fatalf("Got:\n%s\nExpected:\n%s", actualcmds, client)
-	}
-}
-
-var newClientServer = `220 hello world
+	c, wrote := fakeClient(crlf(`220 hello world
 250-mx.google.com at your service
 250-SIZE 35651584
 250-AUTH LOGIN PLAIN
 250 8BITMIME
 221 OK
-`
-
-var newClientClient = `EHLO localhost
-QUIT
-`
-
-func TestNewClient2(t *testing.T) {
-	server := strings.Join(strings.Split(newClient2Server, "\n"), "\r\n")
-	client := strings.Join(strings.Split(newClient2Client, "\n"), "\r\n")
-
-	cmdbuf := &bytes.Buffer{}
-	fake := tester.NewFakeConnStream(strings.NewReader(server), cmdbuf)
-
-	c := New()
-	c.setConn(fake)
+`))
 	defer func() { _ = c.Close() }()
 
-	err := c.greet()
-	require.NoError(t, err)
+	require.NoError(t, c.greet())
+	require.NoError(t, c.Hello())
 
-	err = c.Hello()
-	require.NoError(t, err)
+	ok, args := c.Extension("aUtH")
+	require.True(t, ok, "expected AUTH supported")
+	require.Equal(t, "LOGIN PLAIN", args)
+	ok, _ = c.Extension("DSN")
+	require.False(t, ok, "shouldn't support DSN")
+	require.NoError(t, c.Quit())
 
-	if ok, _ := c.Extension("DSN"); ok {
-		t.Fatal("Shouldn't support DSN")
-	}
-	if err := c.Quit(); err != nil {
-		t.Fatalf("QUIT failed: %s", err)
-	}
-
-	actualcmds := cmdbuf.String()
-	if client != actualcmds {
-		t.Fatalf("Got:\n%s\nExpected:\n%s", actualcmds, client)
-	}
+	require.Equal(t, "EHLO localhost\r\nQUIT\r\n", wrote.String())
 }
 
-var newClient2Server = `220 hello world
+func TestNewClient2(t *testing.T) {
+	c, wrote := fakeClient(crlf(`220 hello world
 502 EH?
 250-mx.google.com at your service
 250-SIZE 35651584
 250-AUTH LOGIN PLAIN
 250 8BITMIME
 221 OK
-`
-
-var newClient2Client = `EHLO localhost
-HELO localhost
-QUIT
-`
-
-func TestHello(t *testing.T) {
-	if len(helloServer) != len(helloClient) {
-		t.Fatal("Hello server and client size mismatch")
-	}
-
-	for i := range helloServer {
-		HelloCase(t, i)
-	}
-}
-
-func HelloCase(t *testing.T, i int) {
-	server := strings.Join(strings.Split(baseHelloServer+helloServer[i], "\n"), "\r\n")
-	client := strings.Join(strings.Split(baseHelloClient+helloClient[i], "\n"), "\r\n")
-
-	cmdbuf := &bytes.Buffer{}
-	fake := tester.NewFakeConnStream(strings.NewReader(server), cmdbuf)
-
-	c := New()
-	c.setConn(fake)
+`))
 	defer func() { _ = c.Close() }()
 
-	c.cfg.localName = "customhost"
-
 	require.NoError(t, c.greet())
-	if i > 0 {
-		require.NoError(t, c.Hello())
-	}
+	require.NoError(t, c.Hello())
 
-	var err error
-	switch i {
-	case 0:
-		c.cfg.localName = "customhost"
-		err = c.Hello()
-	case 1:
-		err = c.StartTLS(nil, "fake.host")
-		if err.Error() == "502 Not implemented" {
-			err = nil
-			_ = c.Quit()
-		}
-	case 2:
-		err = c.Verify("test@example.com", nil)
-	case 3:
-		err = c.Auth(sasl.NewPlainClient("", "user", "pass"))
-	case 4:
-		err = c.Mail("test@example.com", nil)
-	case 5:
-		ok, _ := c.Extension("feature")
-		if ok {
-			t.Error("Expected FEATURE not to be supported")
-		}
-	case 6:
-		err = c.Reset()
-	case 7:
-		err = c.Quit()
-	case 8:
-		err = c.Verify("test@example.com", nil)
-		if err != nil {
+	ok, _ := c.Extension("DSN")
+	require.False(t, ok, "shouldn't support DSN")
+	require.NoError(t, c.Quit())
+
+	require.Equal(t, "EHLO localhost\r\nHELO localhost\r\nQUIT\r\n", wrote.String())
+}
+
+func TestHello(t *testing.T) {
+	require.Len(t, helloClient, len(helloServer))
+
+	for i := range helloServer {
+		t.Run(strconv.Itoa(i), func(t *testing.T) {
+			c, wrote := fakeClient(crlf(baseHelloServer + helloServer[i]))
+			defer func() { _ = c.Close() }()
+
 			c.cfg.localName = "customhost"
-			err = c.Hello()
-			if err != nil {
-				t.Error("Want error, got none")
+
+			require.NoError(t, c.greet())
+			if i > 0 {
+				require.NoError(t, c.Hello())
 			}
-		}
-	case 9:
-		err = c.Noop()
-	default:
-		t.Fatal("Unhandled command")
-	}
 
-	if err != nil {
-		t.Errorf("Command %d failed: %v", i, err)
-	}
+			var err error
+			switch i {
+			case 0:
+				c.cfg.localName = "customhost"
+				err = c.Hello()
+			case 1:
+				err = c.StartTLS(nil, "fake.host")
+				if err.Error() == "502 Not implemented" {
+					err = nil
+					_ = c.Quit()
+				}
+			case 2:
+				err = c.Verify("test@example.com", nil)
+			case 3:
+				err = c.Auth(sasl.NewPlainClient("", "user", "pass"))
+			case 4:
+				err = c.Mail("test@example.com", nil)
+			case 5:
+				ok, _ := c.Extension("feature")
+				assert.False(t, ok, "expected FEATURE not to be supported")
+			case 6:
+				err = c.Reset()
+			case 7:
+				err = c.Quit()
+			case 8:
+				if err = c.Verify("test@example.com", nil); err != nil {
+					c.cfg.localName = "customhost"
+					err = c.Hello()
+				}
+			case 9:
+				err = c.Noop()
+			default:
+				require.FailNow(t, "unhandled command")
+			}
 
-	actualcmds := cmdbuf.String()
-	if client != actualcmds {
-		t.Errorf("Got:\n%s\nExpected:\n%s", actualcmds, client)
+			assert.NoError(t, err)
+			assert.Equal(t, crlf(baseHelloClient+helloClient[i]), wrote.String())
+		})
 	}
 }
 
@@ -564,111 +415,39 @@ var helloClient = []string{
 	"NOOP\n",
 }
 
-var shuttingDownServerHello = `220 hello world
-421 Service not available, closing transmission channel
-`
-
 func TestHello_421Response(t *testing.T) {
-	server := strings.Join(strings.Split(shuttingDownServerHello, "\n"), "\r\n")
-	client := "EHLO customhost\r\n"
-
-	cmdbuf := &bytes.Buffer{}
-	fake := tester.NewFakeConnStream(strings.NewReader(server), cmdbuf)
-
-	c := New()
-	c.setConn(fake)
+	c, wrote := fakeClient("220 hello world\r\n421 Service not available, closing transmission channel\r\n")
 	defer func() { _ = c.Close() }()
 
 	require.NoError(t, c.greet())
 
 	c.cfg.localName = "customhost"
 
-	err := c.Hello()
-	if err == nil {
-		t.Error("Expected Hello to fail")
-	}
-
 	var status *deltasmtp.Status
-	if !errors.As(err, &status) || status.Code != 421 ||
-		status.Lines[0] != "Service not available, closing transmission channel" {
-		t.Errorf("Expected error 421, got %v", err)
-	}
-
-	actualcmds := cmdbuf.String()
-	if client != actualcmds {
-		t.Errorf("Got:\n%s\nExpected:\n%s", actualcmds, client)
-	}
+	require.ErrorAs(t, c.Hello(), &status)
+	require.Equal(t, 421, status.Code)
+	require.Equal(t, "Service not available, closing transmission channel", status.Lines[0])
+	require.Equal(t, "EHLO customhost\r\n", wrote.String())
 }
-
-/* unused
-
-var sendMailServer = `220 hello world
-502 EH?
-250 mx.google.com at your service
-250 Sender ok
-250 Receiver ok
-354 Go ahead
-250 Data ok
-221 Goodbye
-`
-
-var sendMailClient = `EHLO localhost
-HELO localhost
-MAIL FROM:<test@example.com>
-RCPT TO:<other@example.com>
-DATA
-From: test@example.com
-To: other@example.com
-Subject: SendMail test
-
-SendMail is working for me.
-.
-QUIT
-`
-*/
 
 func TestAuthFailed(t *testing.T) {
-	server := strings.Join(strings.Split(authFailedServer, "\n"), "\r\n")
-	client := strings.Join(strings.Split(authFailedClient, "\n"), "\r\n")
-
-	cmdbuf := &bytes.Buffer{}
-	fake := tester.NewFakeConnStream(strings.NewReader(server), cmdbuf)
-
-	c := New()
-	c.setConn(fake)
-	defer func() { _ = c.Close() }()
-
-	require.NoError(t, c.greet())
-	require.NoError(t, c.Hello())
-
-	err := c.Auth(sasl.NewPlainClient("", "user", "pass"))
-
-	if err == nil {
-		t.Error("Auth: expected error; got none")
-	} else if err.Error() != "535 Invalid credentials\nplease see www.example.com" {
-		t.Errorf("Auth: got error: %v, want: %s", err, "Invalid credentials\nplease see www.example.com")
-	}
-
-	require.NoError(t, c.Quit())
-
-	actualcmds := cmdbuf.String()
-	if client != actualcmds {
-		t.Errorf("Got:\n%s\nExpected:\n%s", actualcmds, client)
-	}
-}
-
-var authFailedServer = `220 hello world
+	c, wrote := fakeClient(crlf(`220 hello world
 250-mx.google.com at your service
 250 AUTH LOGIN PLAIN
 535-Invalid credentials
 535 please see www.example.com
 221 Goodbye
-`
+`))
+	defer func() { _ = c.Close() }()
 
-var authFailedClient = `EHLO localhost
-AUTH PLAIN AHVzZXIAcGFzcw==
-QUIT
-`
+	require.NoError(t, c.greet())
+	require.NoError(t, c.Hello())
+	require.EqualError(t, c.Auth(sasl.NewPlainClient("", "user", "pass")),
+		"535 Invalid credentials\nplease see www.example.com")
+	require.NoError(t, c.Quit())
+
+	require.Equal(t, "EHLO localhost\r\nAUTH PLAIN AHVzZXIAcGFzcw==\r\nQUIT\r\n", wrote.String())
+}
 
 func TestTLSConnState(t *testing.T) {
 	keypair, err := tester.GenX509KeyPair("example.com")
@@ -707,21 +486,8 @@ func TestTLSConnState(t *testing.T) {
 	}
 }
 
-var xtextClient = `MAIL FROM:<e=mc2@example.com> AUTH=e+3Dmc2@example.com
-RCPT TO:<e=mc2@example.com> ORCPT=UTF-8;e\x{3D}mc2@example.com
-`
-
 func TestClientXtext(t *testing.T) {
-	server := "220 hello world\r\n" +
-		"250 ok\r\n" +
-		"250 ok"
-	client := strings.Join(strings.Split(xtextClient, "\n"), "\r\n")
-
-	wrote := &bytes.Buffer{}
-	fake := tester.NewFakeConnStream(strings.NewReader(server), wrote)
-
-	c := New()
-	c.setConn(fake)
+	c, wrote := fakeClient("220 hello world\r\n250 ok\r\n250 ok")
 
 	c.session.ext = map[string]string{"AUTH": "PLAIN", "DSN": ""}
 	email := "e=mc2@example.com"
@@ -731,68 +497,44 @@ func TestClientXtext(t *testing.T) {
 		OriginalRecipient:     email,
 	}))
 	require.NoError(t, c.Close())
-	if got := wrote.String(); got != client {
-		t.Errorf("wrote %q; want %q", got, client)
-	}
+	require.Equal(t, "MAIL FROM:<e=mc2@example.com> AUTH=e+3Dmc2@example.com\r\n"+
+		"RCPT TO:<e=mc2@example.com> ORCPT=UTF-8;e\\x{3D}mc2@example.com\r\n", wrote.String())
 }
 
-const (
-	dsnEnvelopeID  = "e=mc2"
-	dsnEmailRFC822 = "e=mc2@example.com"
-	dsnEmailUTF8   = "e=mc2@ドメイン名例.jp"
-)
-
-var dsnServer = `220 hello world
-250 ok
-250 ok
-250 ok
-250 ok
-`
-
-var dsnClient = "MAIL FROM:<e=mc2@example.com> RET=HDRS ENVID=e+3Dmc2\n" +
-	"RCPT TO:<e=mc2@example.com> NOTIFY=NEVER ORCPT=RFC822;e+3Dmc2@example.com\n" +
-	"RCPT TO:<e=mc2@example.com> NOTIFY=FAILURE,DELAY ORCPT=UTF-8;e\\x{3D}mc2@" +
-	"\\x{30C9}\\x{30E1}\\x{30A4}\\x{30F3}\\x{540D}\\x{4F8B}.jp\n" +
-	"RCPT TO:<e=mc2@ドメイン名例.jp> ORCPT=UTF-8;e\\x{3D}mc2@ドメイン名例.jp\n"
-
 func TestClientDSN(t *testing.T) {
-	server := strings.Join(strings.Split(dsnServer, "\n"), "\r\n")
-	client := strings.Join(strings.Split(dsnClient, "\n"), "\r\n")
-
-	wrote := &bytes.Buffer{}
-	fake := tester.NewFakeConnStream(strings.NewReader(server), wrote)
-
-	c := New()
-	c.setConn(fake)
+	const (
+		envelopeID  = "e=mc2"
+		emailRFC822 = "e=mc2@example.com"
+		emailUTF8   = "e=mc2@ドメイン名例.jp"
+	)
+	c, wrote := fakeClient("220 hello world\r\n250 ok\r\n250 ok\r\n250 ok\r\n250 ok\r\n")
 
 	c.session.ext = map[string]string{"DSN": ""}
-	require.Error(t, c.Mail(dsnEmailRFC822, &MailOptions{
+	require.Error(t, c.Mail(emailRFC822, &MailOptions{
 		Return:     deltasmtp.DSNReturnHeaders,
-		EnvelopeID: dsnEnvelopeID,
+		EnvelopeID: envelopeID,
 	}))
-	require.NoError(t, c.Rcpt(dsnEmailRFC822, &deltasmtp.RcptOptions{
+	require.NoError(t, c.Rcpt(emailRFC822, &deltasmtp.RcptOptions{
 		OriginalRecipientType: deltasmtp.DSNAddressTypeRFC822,
-		OriginalRecipient:     dsnEmailRFC822,
+		OriginalRecipient:     emailRFC822,
 		Notify:                []deltasmtp.DSNNotify{deltasmtp.DSNNotifyNever},
 	}))
-	require.NoError(t, c.Rcpt(dsnEmailRFC822, &deltasmtp.RcptOptions{
+	require.NoError(t, c.Rcpt(emailRFC822, &deltasmtp.RcptOptions{
 		OriginalRecipientType: deltasmtp.DSNAddressTypeUTF8,
-		OriginalRecipient:     dsnEmailUTF8,
+		OriginalRecipient:     emailUTF8,
 		Notify:                []deltasmtp.DSNNotify{deltasmtp.DSNNotifyFailure, deltasmtp.DSNNotifyDelayed},
 	}))
 	c.session.ext["SMTPUTF8"] = ""
-	require.NoError(t, c.Rcpt(dsnEmailUTF8, &deltasmtp.RcptOptions{
+	require.NoError(t, c.Rcpt(emailUTF8, &deltasmtp.RcptOptions{
 		OriginalRecipientType: deltasmtp.DSNAddressTypeUTF8,
-		OriginalRecipient:     dsnEmailUTF8,
+		OriginalRecipient:     emailUTF8,
 	}))
 	require.NoError(t, c.Close())
-	if actualcmds := wrote.String(); client != actualcmds {
-		t.Errorf("wrote %q; want %q", actualcmds, client)
-	}
-}
-
-func (c *Client) Test() map[string]string {
-	return c.session.ext
+	require.Equal(t, "MAIL FROM:<e=mc2@example.com> RET=HDRS ENVID=e+3Dmc2\r\n"+
+		"RCPT TO:<e=mc2@example.com> NOTIFY=NEVER ORCPT=RFC822;e+3Dmc2@example.com\r\n"+
+		"RCPT TO:<e=mc2@example.com> NOTIFY=FAILURE,DELAY ORCPT=UTF-8;e\\x{3D}mc2@"+
+		"\\x{30C9}\\x{30E1}\\x{30A4}\\x{30F3}\\x{540D}\\x{4F8B}.jp\r\n"+
+		"RCPT TO:<e=mc2@ドメイン名例.jp> ORCPT=UTF-8;e\\x{3D}mc2@ドメイン名例.jp\r\n", wrote.String())
 }
 
 // A SASL initial response too large to inline within the 512-octet command-line
@@ -800,58 +542,28 @@ func (c *Client) Test() map[string]string {
 // AUTH command line. https://github.com/emersion/go-smtp/issues/301
 func TestClientAuthLargeInitialResponse(t *testing.T) {
 	// didHello is set below, so the first server line is the AUTH response.
-	server := "334 \r\n" +
-		"235 2.0.0 OK\r\n"
-	var wrote bytes.Buffer
-
-	fake := tester.NewFakeConnStream(
-		strings.NewReader(server),
-		&wrote,
-	)
-
-	c := New()
-	c.setConn(fake)
+	c, wrote := fakeClient("334 \r\n235 2.0.0 OK\r\n")
 
 	resp := bytes.Repeat([]byte("x"), 600)
-	if err := c.Auth(largeInitialRespAuth{mech: "LARGE", resp: resp}); err != nil {
-		t.Fatalf("Auth: %v", err)
-	}
+	require.NoError(t, c.Auth(largeInitialRespAuth{mech: "LARGE", resp: resp}))
 	_ = c.Close()
 
 	written := wrote.String()
 	firstLine, _, _ := strings.Cut(written, "\r\n")
-	if firstLine != "AUTH LARGE" {
-		t.Errorf("AUTH command line = %q; want the initial response deferred (%q)", firstLine, "AUTH LARGE")
-	}
-	if len(firstLine)+2 > 512 {
-		t.Errorf("AUTH command line is %d octets, exceeding the 512-octet limit", len(firstLine)+2)
-	}
+	assert.Equal(t, "AUTH LARGE", firstLine, "the initial response must be deferred")
+	assert.LessOrEqual(t, len(firstLine)+2, 512, "AUTH command line exceeds the 512-octet limit")
 	// The initial response must still be sent, on its own line.
-	resp64 := base64.StdEncoding.EncodeToString(resp)
-	if !strings.Contains(written, "\r\n"+resp64+"\r\n") {
-		t.Errorf("deferred initial response was not sent; wrote %q", written)
-	}
+	assert.Contains(t, written, "\r\n"+base64.StdEncoding.EncodeToString(resp)+"\r\n")
 }
 
 // A challenge in the reply to AUTH aborts the exchange instead of dropping the
 // deferred initial response.
 func TestClientAuthLargeInitialResponseChallenge(t *testing.T) {
-	server := "334 Y2hhbGxlbmdl\r\n" +
-		"501 5.7.0 Authentication aborted\r\n"
-	client := "AUTH LARGE\r\n" +
-		"*\r\n"
-	var wrote bytes.Buffer
+	c, wrote := fakeClient("334 Y2hhbGxlbmdl\r\n501 5.7.0 Authentication aborted\r\n")
 
-	c := New()
-	c.setConn(tester.NewFakeConnStream(strings.NewReader(server), &wrote))
-
-	err := c.Auth(largeInitialRespAuth{mech: "LARGE", resp: bytes.Repeat([]byte("x"), 600)})
-	require.Error(t, err)
+	require.Error(t, c.Auth(largeInitialRespAuth{mech: "LARGE", resp: bytes.Repeat([]byte("x"), 600)}))
 	_ = c.Close()
-
-	if got := wrote.String(); got != client {
-		t.Errorf("wrote %q; want %q", got, client)
-	}
+	require.Equal(t, "AUTH LARGE\r\n*\r\n", wrote.String())
 }
 
 // An AUTH line of exactly 512 octets is still sent inline; one more octet defers it.
@@ -863,38 +575,21 @@ func TestClientAuthInitialResponseLimit(t *testing.T) {
 		{"ABCD", "235 2.0.0 OK\r\n", "AUTH ABCD " + resp64 + "\r\n"},
 		{"ABCDE", "334 \r\n235 2.0.0 OK\r\n", "AUTH ABCDE\r\n" + resp64 + "\r\n"},
 	} {
-		var wrote bytes.Buffer
-
-		c := New()
-		c.setConn(tester.NewFakeConnStream(strings.NewReader(tc.server), &wrote))
-
-		if err := c.Auth(largeInitialRespAuth{mech: tc.mech, resp: bytes.Repeat([]byte("x"), 375)}); err != nil {
-			t.Fatalf("Auth(%s): %v", tc.mech, err)
-		}
+		c, wrote := fakeClient(tc.server)
+		require.NoError(t, c.Auth(largeInitialRespAuth{mech: tc.mech, resp: bytes.Repeat([]byte("x"), 375)}), tc.mech)
 		_ = c.Close()
-
-		if got := wrote.String(); got != tc.client {
-			t.Errorf("Auth(%s): wrote %q; want %q", tc.mech, got, tc.client)
-		}
+		assert.Equal(t, tc.client, wrote.String(), tc.mech)
 	}
 }
 
 // A mechanism without an initial response must answer the first challenge
 // itself, not with an empty line.
 func TestClientAuthNoInitialResponse(t *testing.T) {
-	server := "334 Y2hhbGxlbmdl\r\n" +
-		"235 2.0.0 OK\r\n"
-	var wrote bytes.Buffer
-
-	c := New()
-	c.setConn(tester.NewFakeConnStream(strings.NewReader(server), &wrote))
+	c, wrote := fakeClient("334 Y2hhbGxlbmdl\r\n235 2.0.0 OK\r\n")
 
 	require.NoError(t, c.Auth(challengeAuth{}))
 	_ = c.Close()
-
-	if got, want := wrote.String(), "AUTH CHALLENGE\r\ncmVzcG9uc2U=\r\n"; got != want {
-		t.Errorf("wrote %q; want %q", got, want)
-	}
+	require.Equal(t, "AUTH CHALLENGE\r\ncmVzcG9uc2U=\r\n", wrote.String())
 }
 
 type challengeAuth struct{}
@@ -921,65 +616,29 @@ func (largeInitialRespAuth) Next(_ []byte) (toServer []byte, err error) {
 	return nil, nil
 }
 
-var deliverByServer = `220 hello world
-250 ok
-`
-
-var deliverByClient = `MAIL FROM:<root@nsa.gov> BY=100;RT
-`
-
-func TestClientDELIVERBY(t *testing.T) {
-	server := strings.Join(strings.Split(deliverByServer, "\n"), "\r\n")
-	client := strings.Join(strings.Split(deliverByClient, "\n"), "\r\n")
-
-	var wrote bytes.Buffer
-	fake := tester.NewFakeConnStream(
-		strings.NewReader(server),
-		&wrote,
-	)
-	c := New()
-	c.setConn(fake)
-	c.session.ext = map[string]string{"DELIVERBY": ""}
-	_ = c.Mail("root@nsa.gov", &MailOptions{
-		DeliverBy: &deltasmtp.DeliverByOptions{
+// TestClientMailParams checks MAIL parameters of extensions. The MAIL reply is
+// the greeting, so the result of Mail is ignored.
+func TestClientMailParams(t *testing.T) {
+	priority := 6
+	for _, tc := range []struct {
+		ext  string
+		opts *MailOptions
+		want string
+	}{
+		{"DELIVERBY", &MailOptions{DeliverBy: &deltasmtp.DeliverByOptions{
 			Seconds: 100,
 			Mode:    deltasmtp.DeliverByReturn,
 			Trace:   true,
-		},
-	})
-	_ = c.Close()
-	if actualcmds := wrote.String(); client != actualcmds {
-		t.Errorf("wrote %q; want %q", actualcmds, client)
-	}
-}
-
-var mtPriorityServer = `220 hello world
-250 ok
-`
-
-var mtPriorityClient = `MAIL FROM:<root@nsa.gov> MT-PRIORITY=6
-`
-
-func TestClientMTPRIORITY(t *testing.T) {
-	server := strings.Join(strings.Split(mtPriorityServer, "\n"), "\r\n")
-	client := strings.Join(strings.Split(mtPriorityClient, "\n"), "\r\n")
-	var wrote bytes.Buffer
-
-	fake := tester.NewFakeConnStream(
-		strings.NewReader(server),
-		&wrote,
-	)
-
-	c := New()
-	c.setConn(fake)
-	c.session.ext = map[string]string{"MT-PRIORITY": ""}
-	priority := 6
-	_ = c.Mail("root@nsa.gov", &MailOptions{
-		MTPriority: &priority,
-	})
-	_ = c.Close()
-	if actualcmds := wrote.String(); client != actualcmds {
-		t.Errorf("wrote %q; want %q", actualcmds, client)
+		}}, "MAIL FROM:<root@nsa.gov> BY=100;RT\r\n"},
+		{"MT-PRIORITY", &MailOptions{MTPriority: &priority}, "MAIL FROM:<root@nsa.gov> MT-PRIORITY=6\r\n"},
+	} {
+		t.Run(tc.ext, func(t *testing.T) {
+			c, wrote := fakeClient("220 hello world\r\n250 ok\r\n")
+			c.session.ext = map[string]string{tc.ext: ""}
+			_ = c.Mail("root@nsa.gov", tc.opts)
+			_ = c.Close()
+			require.Equal(t, tc.want, wrote.String())
+		})
 	}
 }
 
@@ -1090,24 +749,20 @@ func TestClientMaxResponseLines(t *testing.T) {
 	require.Equal(t, 512, defaultMaxResponseLines)
 
 	t.Run("default", func(t *testing.T) {
-		c := New()
-		c.setConn(tester.NewFakeConn(ehlo(defaultMaxResponseLines+1), &bytes.Buffer{}))
+		c, _ := fakeClient(ehlo(defaultMaxResponseLines + 1))
 		require.ErrorIs(t, c.ehlo(), smtpreader.ErrTooManyResponseLines)
 
-		c = New()
-		c.setConn(tester.NewFakeConn(ehlo(defaultMaxResponseLines), &bytes.Buffer{}))
+		c, _ = fakeClient(ehlo(defaultMaxResponseLines))
 		require.NoError(t, c.ehlo())
 	})
 
 	t.Run("configured", func(t *testing.T) {
-		c := New(WithMaxResponseLines(4))
-		c.setConn(tester.NewFakeConn(ehlo(5), &bytes.Buffer{}))
+		c, _ := fakeClient(ehlo(5), WithMaxResponseLines(4))
 		require.ErrorIs(t, c.ehlo(), smtpreader.ErrTooManyResponseLines)
 	})
 
 	t.Run("disabled", func(t *testing.T) {
-		c := New(WithMaxResponseLines(0))
-		c.setConn(tester.NewFakeConn(ehlo(10*defaultMaxResponseLines), &bytes.Buffer{}))
+		c, _ := fakeClient(ehlo(10*defaultMaxResponseLines), WithMaxResponseLines(0))
 		require.NoError(t, c.ehlo())
 	})
 }
@@ -1130,9 +785,7 @@ func TestClientChunking(t *testing.T) {
 	// send connects a client with opts to a fake CHUNKING server, sends body
 	// and returns what was written to the server.
 	send := func(t *testing.T, size int, src io.Reader, opts ...Option) string {
-		wrote := &bytes.Buffer{}
-		c := New(opts...)
-		c.setConn(tester.NewFakeConn("250-localhost\r\n250 CHUNKING\r\n"+strings.Repeat("250 2.0.0 OK\r\n", 8), wrote))
+		c, wrote := fakeClient("250-localhost\r\n250 CHUNKING\r\n"+strings.Repeat("250 2.0.0 OK\r\n", 8), opts...)
 		require.NoError(t, c.ehlo())
 
 		w, err := c.Content(size)
@@ -1177,8 +830,7 @@ func TestClientChunking(t *testing.T) {
 	})
 
 	t.Run("the buffer is released when the content is closed", func(t *testing.T) {
-		c := New()
-		c.setConn(tester.NewFakeConn("250-localhost\r\n250 CHUNKING\r\n250 2.0.0 OK\r\n", &bytes.Buffer{}))
+		c, _ := fakeClient("250-localhost\r\n250 CHUNKING\r\n250 2.0.0 OK\r\n")
 		require.NoError(t, c.ehlo())
 
 		w, err := c.Bdat(0)
@@ -1196,9 +848,7 @@ func TestClientChunking(t *testing.T) {
 	})
 
 	t.Run("disabled chunking uses DATA", func(t *testing.T) {
-		wrote := &bytes.Buffer{}
-		c := New(WithChunking(false))
-		c.setConn(tester.NewFakeConn("250-localhost\r\n250 CHUNKING\r\n354 go ahead\r\n250 2.0.0 OK\r\n", wrote))
+		c, wrote := fakeClient("250-localhost\r\n250 CHUNKING\r\n354 go ahead\r\n250 2.0.0 OK\r\n", WithChunking(false))
 		require.NoError(t, c.ehlo())
 
 		w, err := c.Content(3)
@@ -1223,8 +873,7 @@ func TestClientProtocolErrorCloses(t *testing.T) {
 
 	connect := func(t *testing.T, server string, opts ...Option) *Client {
 		t.Helper()
-		c := New(opts...)
-		c.setConn(tester.NewFakeConn(server, &bytes.Buffer{}))
+		c, _ := fakeClient(server, opts...)
 		require.NoError(t, c.ehlo())
 		return c
 	}
@@ -1304,6 +953,48 @@ func timeoutServer(t *testing.T, ext string, n int, stall func(c net.Conn, r *bu
 	return l.Addr().String()
 }
 
+// startData answers DATA with 354.
+func startData(c net.Conn, r *bufio.Reader) {
+	_, _ = r.ReadString('\n')
+	_, _ = io.WriteString(c, "354 go ahead\r\n")
+}
+
+// readData reads the message content up to the final dot.
+func readData(r *bufio.Reader) {
+	for {
+		line, err := r.ReadString('\n')
+		if err != nil || line == ".\r\n" {
+			return
+		}
+	}
+}
+
+// startTransaction dials addr and sends MAIL and RCPT.
+func startTransaction(t *testing.T, c *Client, addr string) {
+	t.Helper()
+	require.NoError(t, c.Dial(context.Background(), addr))
+	require.NoError(t, c.Mail("a@example.org", nil))
+	require.NoError(t, c.Rcpt("b@example.org", nil))
+}
+
+// sendData sends a short message with DATA.
+func sendData(t *testing.T, c *Client) {
+	t.Helper()
+	w, err := c.Data()
+	require.NoError(t, err)
+	_, err = w.Write([]byte("Subject: test\r\n\r\nHey\r\n"))
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
+}
+
+// requireTimeout requires err to be a network timeout.
+func requireTimeout(t *testing.T, err error) {
+	t.Helper()
+	var netErr net.Error
+	require.ErrorAs(t, err, &netErr)
+	require.True(t, netErr.Timeout())
+}
+
 // The command deadline is renewed lazily, but every command still has at least the
 // command timeout, also right after a renewal was skipped. A reply that never comes
 // fails after at most 125% of the timeout.
@@ -1331,9 +1022,7 @@ func TestClientCommandTimeoutRenewed(t *testing.T) {
 	start := time.Now()
 	err := c.Noop()
 	elapsed := time.Since(start)
-	var netErr net.Error
-	require.ErrorAs(t, err, &netErr)
-	require.True(t, netErr.Timeout())
+	requireTimeout(t, err)
 	require.GreaterOrEqual(t, elapsed, timeout)
 	require.Less(t, elapsed, timeout*5/4+100*time.Millisecond)
 }
@@ -1355,9 +1044,7 @@ func TestClientTLSHandshakeTimeoutDialTLS(t *testing.T) {
 	c := New(WithTLSHandshakeTimeout(100 * time.Millisecond))
 	start := time.Now()
 	err = c.DialTLS(context.Background(), nil, l.Addr().String())
-	var netErr net.Error
-	require.ErrorAs(t, err, &netErr)
-	require.True(t, netErr.Timeout())
+	requireTimeout(t, err)
 	require.Less(t, time.Since(start), 3*time.Second)
 	require.False(t, c.Connected())
 }
@@ -1374,14 +1061,11 @@ func TestClientZeroTimeouts(t *testing.T) {
 // A server that stops reading the message content doesn't block the client forever.
 func TestClientDataTimeoutDataWrite(t *testing.T) {
 	addr := timeoutServer(t, "8BITMIME", 2, func(c net.Conn, r *bufio.Reader) {
-		_, _ = r.ReadString('\n')
-		_, _ = io.WriteString(c, "354 go ahead\r\n")
+		startData(c, r)
 		time.Sleep(5 * time.Second) // stop reading
 	})
 	c := New(WithDataTimeout(100 * time.Millisecond))
-	require.NoError(t, c.Dial(context.Background(), addr))
-	require.NoError(t, c.Mail("a@example.org", nil))
-	require.NoError(t, c.Rcpt("b@example.org", nil))
+	startTransaction(t, c, addr)
 	w, err := c.Data()
 	require.NoError(t, err)
 
@@ -1390,9 +1074,7 @@ func TestClientDataTimeoutDataWrite(t *testing.T) {
 	for err == nil {
 		_, err = w.Write(line)
 	}
-	var netErr net.Error
-	require.ErrorAs(t, err, &netErr)
-	require.True(t, netErr.Timeout())
+	requireTimeout(t, err)
 	require.Less(t, time.Since(start), 3*time.Second)
 	require.False(t, c.Connected(), "a partly sent message must close the connection")
 }
@@ -1403,17 +1085,13 @@ func TestClientDataTimeoutBdatReply(t *testing.T) {
 		_, _ = io.Copy(io.Discard, r) // read, never reply
 	})
 	c := New(WithDataTimeout(100*time.Millisecond), WithChunkingBufferSize(0))
-	require.NoError(t, c.Dial(context.Background(), addr))
-	require.NoError(t, c.Mail("a@example.org", nil))
-	require.NoError(t, c.Rcpt("b@example.org", nil))
+	startTransaction(t, c, addr)
 	w, err := c.Bdat(0)
 	require.NoError(t, err)
 
 	start := time.Now()
 	_, err = w.Write([]byte("Subject: test\r\n"))
-	var netErr net.Error
-	require.ErrorAs(t, err, &netErr)
-	require.True(t, netErr.Timeout())
+	requireTimeout(t, err)
 	require.Less(t, time.Since(start), 3*time.Second)
 	require.False(t, c.Connected())
 }
@@ -1422,14 +1100,11 @@ func TestClientDataTimeoutBdatReply(t *testing.T) {
 // writes through Writer(), as done by the mailer.
 func TestClientDataTimeoutWholeTransfer(t *testing.T) {
 	addr := timeoutServer(t, "8BITMIME", 2, func(c net.Conn, r *bufio.Reader) {
-		_, _ = r.ReadString('\n')
-		_, _ = io.WriteString(c, "354 go ahead\r\n")
+		startData(c, r)
 		_, _ = io.Copy(io.Discard, r) // read, never reply
 	})
 	c := New(WithDataTimeout(150 * time.Millisecond))
-	require.NoError(t, c.Dial(context.Background(), addr))
-	require.NoError(t, c.Mail("a@example.org", nil))
-	require.NoError(t, c.Rcpt("b@example.org", nil))
+	startTransaction(t, c, addr)
 	w, err := c.Data()
 	require.NoError(t, err)
 
@@ -1438,37 +1113,22 @@ func TestClientDataTimeoutWholeTransfer(t *testing.T) {
 		_, err = w.Writer().Write([]byte("slow line\r\n"))
 		require.NoError(t, err) // buffered
 	}
-	err = w.Close()
-	var netErr net.Error
-	require.ErrorAs(t, err, &netErr)
-	require.True(t, netErr.Timeout())
+	requireTimeout(t, w.Close())
 	require.False(t, c.Connected())
 }
 
 // After a transfer the data deadline must not stay active, even if the command timeout is disabled.
 func TestClientDataTimeoutClearedAfterTransfer(t *testing.T) {
 	addr := timeoutServer(t, "8BITMIME", 2, func(c net.Conn, r *bufio.Reader) {
-		_, _ = r.ReadString('\n')
-		_, _ = io.WriteString(c, "354 go ahead\r\n")
-		for {
-			line, err := r.ReadString('\n')
-			if err != nil || line == ".\r\n" {
-				break
-			}
-		}
+		startData(c, r)
+		readData(r)
 		_, _ = io.WriteString(c, "250 queued\r\n")
 		_, _ = r.ReadString('\n')
 		_, _ = io.WriteString(c, "250 ok\r\n")
 	})
 	c := New(WithCommandTimeout(0), WithDataTimeout(100*time.Millisecond))
-	require.NoError(t, c.Dial(context.Background(), addr))
-	require.NoError(t, c.Mail("a@example.org", nil))
-	require.NoError(t, c.Rcpt("b@example.org", nil))
-	w, err := c.Data()
-	require.NoError(t, err)
-	_, err = w.Write([]byte("Subject: test\r\n\r\nHey\r\n"))
-	require.NoError(t, err)
-	require.NoError(t, w.Close())
+	startTransaction(t, c, addr)
+	sendData(t, c)
 
 	time.Sleep(200 * time.Millisecond)
 	require.NoError(t, c.Noop())
@@ -1478,28 +1138,16 @@ func TestClientDataTimeoutClearedAfterTransfer(t *testing.T) {
 // rest of the data deadline.
 func TestClientCommandTimeoutAfterTransfer(t *testing.T) {
 	addr := timeoutServer(t, "8BITMIME", 2, func(c net.Conn, r *bufio.Reader) {
-		_, _ = r.ReadString('\n')
-		_, _ = io.WriteString(c, "354 go ahead\r\n")
-		for {
-			line, err := r.ReadString('\n')
-			if err != nil || line == ".\r\n" {
-				break
-			}
-		}
+		startData(c, r)
+		readData(r)
 		_, _ = io.WriteString(c, "250 queued\r\n")
 		_, _ = r.ReadString('\n')
 		time.Sleep(200 * time.Millisecond) // after the data deadline
 		_, _ = io.WriteString(c, "250 ok\r\n")
 	})
 	c := New(WithCommandTimeout(time.Minute), WithDataTimeout(100*time.Millisecond))
-	require.NoError(t, c.Dial(context.Background(), addr))
-	require.NoError(t, c.Mail("a@example.org", nil))
-	require.NoError(t, c.Rcpt("b@example.org", nil))
-	w, err := c.Data()
-	require.NoError(t, err)
-	_, err = w.Write([]byte("Subject: test\r\n\r\nHey\r\n"))
-	require.NoError(t, err)
-	require.NoError(t, w.Close())
+	startTransaction(t, c, addr)
+	sendData(t, c)
 
 	require.NoError(t, c.Noop())
 }
@@ -1524,10 +1172,7 @@ func TestGetChunkingBuffer(t *testing.T) {
 
 // TestMailVerifyUTF8 checks that SMTPUTF8 is only sent if requested.
 func TestMailVerifyUTF8(t *testing.T) {
-	server := "250 OK\r\n250 OK\r\n250 OK\r\n250 OK\r\n"
-	wrote := &bytes.Buffer{}
-	c := New()
-	c.setConn(tester.NewFakeConnStream(strings.NewReader(server), wrote))
+	c, wrote := fakeClient("250 OK\r\n250 OK\r\n250 OK\r\n250 OK\r\n")
 	c.session.ext = map[string]string{}
 
 	require.ErrorContains(t, c.Mail("a@example.org", &MailOptions{SMTPUTF8: true}), "server does not support SMTPUTF8")

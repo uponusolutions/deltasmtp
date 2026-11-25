@@ -38,10 +38,8 @@ func limitTestServer(t *testing.T, be *backend, maxMessageBytes int64) (*backend
 		_ = s.Close()
 	})
 
-	_, _ = io.WriteString(c, "MAIL FROM:<root@nsa.gov>\r\n")
-	require.True(t, strings.HasPrefix(readReply(t, c, scanner), "250 "))
-	_, _ = io.WriteString(c, "RCPT TO:<root@gchq.gov.uk>\r\n")
-	require.True(t, strings.HasPrefix(readReply(t, c, scanner), "250 "))
+	expect(t, c, scanner, "MAIL FROM:<root@nsa.gov>", "250 ")
+	expect(t, c, scanner, "RCPT TO:<root@gchq.gov.uk>", "250 ")
 
 	return be, c, scanner
 }
@@ -51,12 +49,8 @@ func limitTestServer(t *testing.T, be *backend, maxMessageBytes int64) (*backend
 func requireTooLargeAndClosed(t *testing.T, be *backend, c net.Conn, scanner *bufio.Scanner) {
 	t.Helper()
 
-	reply := readReply(t, c, scanner)
-	require.True(t, strings.HasPrefix(reply, "552 5.3.4 "), "expected 552 reply, got %q", reply)
-
-	if scan(t, c, scanner) {
-		t.Fatalf("expected connection to be closed, got reply %q", scanner.Text())
-	}
+	requirePrefix(t, readReply(t, c, scanner), "552 5.3.4 ")
+	require.False(t, scan(t, c, scanner), "expected connection to be closed, got reply %q", scanner.Text())
 	require.NoError(t, scanner.Err(), "expected EOF, not a read timeout")
 
 	select {
@@ -70,17 +64,13 @@ func requireTooLargeAndClosed(t *testing.T, be *backend, c net.Conn, scanner *bu
 // requireSessionUsable checks that the connection is still in sync.
 func requireSessionUsable(t *testing.T, c net.Conn, scanner *bufio.Scanner) {
 	t.Helper()
-
-	_, _ = io.WriteString(c, "NOOP\r\n")
-	reply := readReply(t, c, scanner)
-	require.True(t, strings.HasPrefix(reply, "250 2.0.0 "), "expected NOOP reply, got %q", reply)
+	expect(t, c, scanner, "NOOP", "250 2.0.0 ")
 }
 
 func TestServerLimit_Data_TooLargeClosesConnection(t *testing.T) {
 	be, c, scanner := limitTestServer(t, nil, 50)
 
-	_, _ = io.WriteString(c, "DATA\r\n")
-	require.True(t, strings.HasPrefix(readReply(t, c, scanner), "354 "))
+	expect(t, c, scanner, "DATA", "354 ")
 
 	// Everything after the first 50 bytes must never be executed as commands.
 	_, _ = io.WriteString(c, strings.Repeat("x", 60)+"\r\n"+
@@ -97,8 +87,7 @@ func TestServerLimit_Data_TooLargeClosesConnection(t *testing.T) {
 func TestServerLimit_Data_BackendSwallowsError(t *testing.T) {
 	be, c, scanner := limitTestServer(t, &backend{swallowDataErr: true}, 50)
 
-	_, _ = io.WriteString(c, "DATA\r\n")
-	require.True(t, strings.HasPrefix(readReply(t, c, scanner), "354 "))
+	expect(t, c, scanner, "DATA", "354 ")
 
 	_, _ = io.WriteString(c, strings.Repeat("x", 60)+"\r\nNOOP\r\n.\r\n")
 
@@ -112,8 +101,7 @@ func TestServerLimit_Data_BackendRejectsWithoutReading(t *testing.T) {
 	rejected := deltasmtp.NewStatusS(554, deltasmtp.EnhancedCode{5, 6, 0}, "rejected")
 	be, c, scanner := limitTestServer(t, &backend{rejectAfterOpen: rejected}, 50)
 
-	_, _ = io.WriteString(c, "DATA\r\n")
-	require.True(t, strings.HasPrefix(readReply(t, c, scanner), "354 "))
+	expect(t, c, scanner, "DATA", "354 ")
 
 	_, _ = io.WriteString(c, strings.Repeat("x", 60)+"\r\nNOOP\r\n.\r\n")
 
@@ -125,12 +113,10 @@ func TestServerLimit_Data_BackendRejectsWithinLimit(t *testing.T) {
 	rejected := deltasmtp.NewStatusS(554, deltasmtp.EnhancedCode{5, 6, 0}, "rejected")
 	_, c, scanner := limitTestServer(t, &backend{rejectAfterOpen: rejected}, 50)
 
-	_, _ = io.WriteString(c, "DATA\r\n")
-	require.True(t, strings.HasPrefix(readReply(t, c, scanner), "354 "))
+	expect(t, c, scanner, "DATA", "354 ")
 
 	_, _ = io.WriteString(c, "Hello\r\n.\r\n")
-	reply := readReply(t, c, scanner)
-	require.True(t, strings.HasPrefix(reply, "554 5.6.0 "), "got %q", reply)
+	requirePrefix(t, readReply(t, c, scanner), "554 5.6.0 ")
 
 	requireSessionUsable(t, c, scanner)
 }
@@ -140,23 +126,17 @@ func TestServerLimit_Data_RejectedEndOfDataEndsTransaction(t *testing.T) {
 	rejected := deltasmtp.NewStatusS(554, deltasmtp.EnhancedCode{5, 6, 0}, "rejected")
 	_, c, scanner := limitTestServer(t, &backend{rejectAfterOpen: rejected}, 50)
 
-	_, _ = io.WriteString(c, "DATA\r\n")
-	require.True(t, strings.HasPrefix(readReply(t, c, scanner), "354 "))
+	expect(t, c, scanner, "DATA", "354 ")
 	_, _ = io.WriteString(c, "Hello\r\n.\r\n")
-	reply := readReply(t, c, scanner)
-	require.True(t, strings.HasPrefix(reply, "554 5.6.0 "), "got %q", reply)
+	requirePrefix(t, readReply(t, c, scanner), "554 5.6.0 ")
 
 	// Pipelined RCPT and DATA must not reuse the previous envelope.
 	_, _ = io.WriteString(c, "RCPT TO:<root@gchq.gov.uk>\r\nDATA\r\n")
-	reply = readReply(t, c, scanner)
-	require.True(t, strings.HasPrefix(reply, "5"), "RCPT without MAIL, got %q", reply)
-	reply = readReply(t, c, scanner)
-	require.True(t, strings.HasPrefix(reply, "5"), "DATA without MAIL, got %q", reply)
+	requirePrefix(t, readReply(t, c, scanner), "5") // RCPT without MAIL
+	requirePrefix(t, readReply(t, c, scanner), "5") // DATA without MAIL
 
 	// A new transaction can be started.
-	_, _ = io.WriteString(c, "MAIL FROM:<root@nsa.gov>\r\n")
-	reply = readReply(t, c, scanner)
-	require.True(t, strings.HasPrefix(reply, "250 "), "got %q", reply)
+	expect(t, c, scanner, "MAIL FROM:<root@nsa.gov>", "250 ")
 }
 
 func TestServerLimit_Data_RejectedCommandKeepsTransaction(t *testing.T) {
@@ -164,13 +144,9 @@ func TestServerLimit_Data_RejectedCommandKeepsTransaction(t *testing.T) {
 	rejected := deltasmtp.NewStatusS(554, deltasmtp.EnhancedCode{5, 6, 0}, "rejected")
 	_, c, scanner := limitTestServer(t, &backend{dataErr: rejected}, 50)
 
-	_, _ = io.WriteString(c, "DATA\r\n")
-	reply := readReply(t, c, scanner)
-	require.True(t, strings.HasPrefix(reply, "554 5.6.0 "), "got %q", reply)
+	expect(t, c, scanner, "DATA", "554 5.6.0 ")
 
-	_, _ = io.WriteString(c, "RCPT TO:<other@gchq.gov.uk>\r\n")
-	reply = readReply(t, c, scanner)
-	require.True(t, strings.HasPrefix(reply, "250 "), "got %q", reply)
+	expect(t, c, scanner, "RCPT TO:<other@gchq.gov.uk>", "250 ")
 }
 
 func TestServerLimit_Bdat_BackendRejectsWithoutReading(t *testing.T) {
@@ -188,8 +164,7 @@ func TestServerLimit_Bdat_BackendRejectsWithinLimit(t *testing.T) {
 	_, c, scanner := limitTestServer(t, &backend{rejectAfterOpen: rejected}, 50)
 
 	_, _ = io.WriteString(c, "BDAT 6 LAST\r\nNOOP\r\n")
-	reply := readReply(t, c, scanner)
-	require.True(t, strings.HasPrefix(reply, "554 5.6.0 "), "got %q", reply)
+	requirePrefix(t, readReply(t, c, scanner), "554 5.6.0 ")
 
 	requireSessionUsable(t, c, scanner)
 }
@@ -197,14 +172,12 @@ func TestServerLimit_Bdat_BackendRejectsWithinLimit(t *testing.T) {
 func TestServerLimit_Data_ExactLimit(t *testing.T) {
 	be, c, scanner := limitTestServer(t, nil, 50)
 
-	_, _ = io.WriteString(c, "DATA\r\n")
-	require.True(t, strings.HasPrefix(readReply(t, c, scanner), "354 "))
+	expect(t, c, scanner, "DATA", "354 ")
 
 	body := strings.Repeat("x", 48) + "\r\n"
 	_, _ = io.WriteString(c, body+".\r\n")
 
-	reply := readReply(t, c, scanner)
-	require.True(t, strings.HasPrefix(reply, "250 "), "got %q", reply)
+	requirePrefix(t, readReply(t, c, scanner), "250 ")
 	require.Len(t, be.messages, 1)
 	require.Equal(t, body, string(be.messages[0].Data))
 
@@ -227,7 +200,7 @@ func TestServerLimit_Bdat_SecondChunkTooLarge(t *testing.T) {
 	be, c, scanner := limitTestServer(t, nil, 50)
 
 	_, _ = io.WriteString(c, "BDAT 30\r\n"+strings.Repeat("a", 30))
-	require.True(t, strings.HasPrefix(readReply(t, c, scanner), "250 "))
+	requirePrefix(t, readReply(t, c, scanner), "250 ")
 
 	payload := strings.Repeat("b", 15) + "\r\nNOOP\r\nRSET\r\n"
 	_, _ = io.WriteString(c, "BDAT "+strconv.Itoa(len(payload))+" LAST\r\n"+payload)
@@ -247,7 +220,7 @@ func TestServerLimit_Bdat_PipelinedChunksTooLarge(t *testing.T) {
 			"BDAT 6 LAST\r\nNOOP\r\n")
 
 	// reply for the first chunk
-	require.True(t, strings.HasPrefix(readReply(t, c, scanner), "250 "))
+	requirePrefix(t, readReply(t, c, scanner), "250 ")
 	requireTooLargeAndClosed(t, be, c, scanner)
 	require.Empty(t, be.messages)
 }
@@ -265,10 +238,9 @@ func TestServerLimit_Bdat_ExactLimit(t *testing.T) {
 	be, c, scanner := limitTestServer(t, nil, 50)
 
 	_, _ = io.WriteString(c, "BDAT 25\r\n"+strings.Repeat("a", 25))
-	require.True(t, strings.HasPrefix(readReply(t, c, scanner), "250 "))
+	requirePrefix(t, readReply(t, c, scanner), "250 ")
 	_, _ = io.WriteString(c, "BDAT 25 LAST\r\n"+strings.Repeat("b", 25))
-	reply := readReply(t, c, scanner)
-	require.True(t, strings.HasPrefix(reply, "250 "), "got %q", reply)
+	requirePrefix(t, readReply(t, c, scanner), "250 ")
 
 	require.Len(t, be.messages, 1)
 	require.Equal(t, strings.Repeat("a", 25)+strings.Repeat("b", 25), string(be.messages[0].Data))
@@ -281,12 +253,10 @@ func TestServerLimit_Bdat_ExactLimit(t *testing.T) {
 func TestServerLimit_Data_BackendOwnTooLarge(t *testing.T) {
 	_, c, scanner := limitTestServer(t, &backend{rejectAfterOpen: deltasmtp.ErrDataTooLarge}, 50)
 
-	_, _ = io.WriteString(c, "DATA\r\n")
-	require.True(t, strings.HasPrefix(readReply(t, c, scanner), "354 "))
+	expect(t, c, scanner, "DATA", "354 ")
 
 	_, _ = io.WriteString(c, "Hello\r\n.\r\n")
-	reply := readReply(t, c, scanner)
-	require.True(t, strings.HasPrefix(reply, "552 5.3.4 "), "got %q", reply)
+	requirePrefix(t, readReply(t, c, scanner), "552 5.3.4 ")
 
 	requireSessionUsable(t, c, scanner)
 }
@@ -295,8 +265,7 @@ func TestServerLimit_Bdat_BackendOwnTooLarge(t *testing.T) {
 	_, c, scanner := limitTestServer(t, &backend{rejectAfterOpen: deltasmtp.ErrDataTooLarge}, 50)
 
 	_, _ = io.WriteString(c, "BDAT 6 LAST\r\nNOOP\r\n")
-	reply := readReply(t, c, scanner)
-	require.True(t, strings.HasPrefix(reply, "552 5.3.4 "), "got %q", reply)
+	requirePrefix(t, readReply(t, c, scanner), "552 5.3.4 ")
 
 	requireSessionUsable(t, c, scanner)
 }
@@ -352,7 +321,7 @@ func TestServerLimit_Connections(t *testing.T) {
 			// The first connection is already open.
 			for range tt.accepted - 1 {
 				_, reply := dialGreeted(t, addr)
-				require.True(t, strings.HasPrefix(reply, "220 "), "got %q", reply)
+				requirePrefix(t, reply, "220 ")
 			}
 
 			if tt.rejected == "" {
@@ -361,13 +330,10 @@ func TestServerLimit_Connections(t *testing.T) {
 
 			cc, reply := dialGreeted(t, addr)
 			require.Equal(t, tt.rejected, reply)
-			if scan(t, cc, bufio.NewScanner(cc)) {
-				t.Fatal("expected connection to be closed")
-			}
+			require.False(t, scan(t, cc, bufio.NewScanner(cc)), "expected connection to be closed")
 
 			// Closing a connection frees a slot.
-			_, _ = io.WriteString(c, "QUIT\r\n")
-			require.True(t, strings.HasPrefix(readReply(t, c, scanner), "221 "))
+			expect(t, c, scanner, "QUIT", "221 ")
 			_ = c.Close()
 
 			require.Eventually(t, func() bool {
@@ -434,24 +400,15 @@ func TestServerLimit_MaxTransactions(t *testing.T) {
 		_ = s.Close()
 	})
 
-	_, _ = io.WriteString(c, "MAIL FROM:invalid\r\n")
-	reply := readReply(t, c, scanner)
-	require.True(t, strings.HasPrefix(reply, "501 "), "got %q", reply)
+	expect(t, c, scanner, "MAIL FROM:invalid", "501 ")
 
 	for range 2 {
-		_, _ = io.WriteString(c, "MAIL FROM:<root@nsa.gov>\r\n")
-		reply = readReply(t, c, scanner)
-		require.True(t, strings.HasPrefix(reply, "250 "), "got %q", reply)
-		_, _ = io.WriteString(c, "RSET\r\n")
-		reply = readReply(t, c, scanner)
-		require.True(t, strings.HasPrefix(reply, "250 "), "got %q", reply)
+		expect(t, c, scanner, "MAIL FROM:<root@nsa.gov>", "250 ")
+		expect(t, c, scanner, "RSET", "250 ")
 	}
 
-	_, _ = io.WriteString(c, "MAIL FROM:<root@nsa.gov>\r\n")
-	require.Equal(t, "421 4.7.0 Too many transactions in this session", readReply(t, c, scanner))
-	if scan(t, c, scanner) {
-		t.Fatalf("expected connection to be closed, got %q", scanner.Text())
-	}
+	require.Equal(t, "421 4.7.0 Too many transactions in this session", send(t, c, scanner, "MAIL FROM:<root@nsa.gov>"))
+	require.False(t, scan(t, c, scanner), "expected connection to be closed, got %q", scanner.Text())
 
 	select {
 	case err := <-be.closeErrors:
@@ -467,24 +424,18 @@ func TestServerLimit_MaxRecipients(t *testing.T) {
 	_, c, scanner := limitTestServerRcpt(t, server.WithMaxRecipients(3))
 
 	// limitTestServerRcpt already sent one RCPT, a rejected one doesn't count.
-	_, _ = io.WriteString(c, "RCPT TO:invalid\r\n")
-	reply := readReply(t, c, scanner)
-	require.True(t, strings.HasPrefix(reply, "501 "), "got %q", reply)
+	expect(t, c, scanner, "RCPT TO:invalid", "501 ")
 
 	for _, rcpt := range []string{"a", "b"} {
-		_, _ = io.WriteString(c, "RCPT TO:<"+rcpt+"@gchq.gov.uk>\r\n")
-		reply = readReply(t, c, scanner)
-		require.True(t, strings.HasPrefix(reply, "250 "), "got %q", reply)
+		expect(t, c, scanner, "RCPT TO:<"+rcpt+"@gchq.gov.uk>", "250 ")
 	}
 
-	_, _ = io.WriteString(c, "RCPT TO:<c@gchq.gov.uk>\r\n")
-	require.Equal(t, "452 4.5.3 Maximum limit of 3 recipients reached", readReply(t, c, scanner))
+	require.Equal(t, "452 4.5.3 Maximum limit of 3 recipients reached", send(t, c, scanner, "RCPT TO:<c@gchq.gov.uk>"))
 
 	// A new transaction starts counting again.
 	_, _ = io.WriteString(c, "RSET\r\nMAIL FROM:<root@nsa.gov>\r\nRCPT TO:<b@gchq.gov.uk>\r\n")
 	for range 3 {
-		reply = readReply(t, c, scanner)
-		require.True(t, strings.HasPrefix(reply, "250 "), "got %q", reply)
+		requirePrefix(t, readReply(t, c, scanner), "250 ")
 	}
 }
 
@@ -499,10 +450,8 @@ func limitTestServerRcpt(t *testing.T, opts ...server.Option) (*backend, net.Con
 		_ = s.Close()
 	})
 
-	_, _ = io.WriteString(c, "MAIL FROM:<root@nsa.gov>\r\n")
-	require.True(t, strings.HasPrefix(readReply(t, c, scanner), "250 "))
-	_, _ = io.WriteString(c, "RCPT TO:<root@gchq.gov.uk>\r\n")
-	require.True(t, strings.HasPrefix(readReply(t, c, scanner), "250 "))
+	expect(t, c, scanner, "MAIL FROM:<root@nsa.gov>", "250 ")
+	expect(t, c, scanner, "RCPT TO:<root@gchq.gov.uk>", "250 ")
 
 	return be, c, scanner
 }
@@ -535,8 +484,7 @@ func TestServerLimit_BdatDiscard(t *testing.T) {
 				})
 
 				if p.mail {
-					_, _ = io.WriteString(c, "MAIL FROM:<root@nsa.gov>\r\n")
-					require.True(t, strings.HasPrefix(readReply(t, c, scanner), "250 "))
+					expect(t, c, scanner, "MAIL FROM:<root@nsa.gov>", "250 ")
 				}
 
 				// The chunk content must never be executed as commands.
@@ -549,8 +497,7 @@ func TestServerLimit_BdatDiscard(t *testing.T) {
 					return
 				}
 
-				reply := readReply(t, c, scanner)
-				require.True(t, strings.HasPrefix(reply, p.reply), "got %q", reply)
+				requirePrefix(t, readReply(t, c, scanner), p.reply)
 				requireSessionUsable(t, c, scanner)
 			})
 		}

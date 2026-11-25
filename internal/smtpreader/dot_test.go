@@ -24,7 +24,7 @@ func TestDotReader(t *testing.T) {
 
 		r = smtpreader.NewDot(buf, 0)
 		b, err = io.ReadAll(r)
-		require.Error(t, io.ErrUnexpectedEOF, err)
+		require.ErrorIs(t, err, io.ErrUnexpectedEOF)
 		require.Equal(t, []byte("anot.her\n"), b)
 	})
 
@@ -45,11 +45,8 @@ func TestDotReader(t *testing.T) {
 		got, err := io.ReadAll(r)
 
 		require.NoError(t, err)
-		require.Len(t, got, 0, "empty DATA")
-
-		if err := <-done; err != nil {
-			t.Fatal(err)
-		}
+		require.Empty(t, got, "empty DATA")
+		require.NoError(t, <-done)
 	})
 
 	// Adapted from Jabberwocky238's testcase.
@@ -57,9 +54,9 @@ func TestDotReader(t *testing.T) {
 	t.Run("ZeroRead", func(t *testing.T) {
 		buf := bufio.NewReader(strings.NewReader("..first\r\n.\r\nNEXT\r\n"))
 		r := smtpreader.NewDot(buf, 0)
-		if n, err := r.Read(nil); n != 0 || err != nil {
-			t.Fatalf("zero read: %d, %v", n, err)
-		}
+		n, err := r.Read(nil)
+		require.NoError(t, err)
+		require.Zero(t, n)
 		got, err := io.ReadAll(r)
 		require.NoError(t, err)
 		require.Equal(t, ".first\r\n", string(got))
@@ -81,7 +78,7 @@ func TestDotReader(t *testing.T) {
 		buf = bufio.NewReader(strings.NewReader(input))
 		r = smtpreader.NewDot(buf, 34)
 		b, err = io.ReadAll(r)
-		require.Error(t, deltasmtp.ErrDataTooLarge, err)
+		require.ErrorIs(t, err, deltasmtp.ErrDataTooLarge)
 		require.Equal(t, []byte("dotlines\r\nfoo\r\n.bar\n...baz\nquux\r\n\r"), b)
 	})
 }
@@ -90,190 +87,104 @@ func write(w io.Writer, d string) {
 	go func() { _, _ = w.Write([]byte(d)) }()
 }
 
-func TestDotReaderBytes(t *testing.T) {
-	var n int
-	var err error
+// requireRead reads once into buf, requires want to be read and returns the
+// error of the Read.
+func requireRead(t *testing.T, r io.Reader, buf []byte, want string) error {
+	t.Helper()
+	n, err := r.Read(buf)
+	require.Equal(t, want, string(buf[:n]))
+	return err
+}
 
+func TestDotReaderBytes(t *testing.T) {
 	t.Run("Case1", func(t *testing.T) {
 		reader, writer := io.Pipe()
 		buf := make([]byte, 255)
-		bufio := bufio.NewReader(reader)
-		r := smtpreader.NewDot(bufio, 0)
+		br := bufio.NewReader(reader)
+		r := smtpreader.NewDot(br, 0)
 
 		// only t is read
 		write(writer, "t\r\n.\r")
-		n, err = r.Read(buf)
-		require.NoError(t, err)
-		require.Equal(t, 1, n)
-		require.Equal(t, []byte("t"), buf[:n])
+		require.NoError(t, requireRead(t, r, buf, "t"))
 
 		// reader finishes because of full crlf.crlf
 		write(writer, "\n")
-		n, err = r.Read(buf)
-		require.Error(t, io.EOF, err)
-		require.Equal(t, 2, n)
-		require.Equal(t, []byte("\r\n"), buf[:n])
+		require.NoError(t, requireRead(t, r, buf, "\r\n"))
+		require.ErrorIs(t, requireRead(t, r, buf, ""), io.EOF)
 
 		// buffer must be empty
-		require.Equal(t, 0, bufio.Buffered())
+		require.Zero(t, br.Buffered())
 	})
 
 	t.Run("Case2", func(t *testing.T) {
 		reader, writer := io.Pipe()
 		buf := make([]byte, 1) // smallest buffer possible
-		bufio := bufio.NewReader(reader)
-		r := smtpreader.NewDot(bufio, 0)
+		br := bufio.NewReader(reader)
+		r := smtpreader.NewDot(br, 0)
 
 		// only t is read
 		write(writer, "t\r\n.\r")
-		n, err = r.Read(buf)
-		require.NoError(t, err)
-		require.Equal(t, 1, n)
-		require.Equal(t, []byte("t"), buf[:n])
+		require.NoError(t, requireRead(t, r, buf, "t"))
 
 		// reader can only return \r as buffer is too small
 		write(writer, "\n")
-		n, err = r.Read(buf)
-		require.NoError(t, err)
-		require.Equal(t, 1, n)
-		require.Equal(t, []byte("\r"), buf[:n])
+		require.NoError(t, requireRead(t, r, buf, "\r"))
 
 		// reader returns \n and eol
 		write(writer, "\n")
-		n, err = r.Read(buf)
-		require.Error(t, io.EOF, err)
-		require.Equal(t, 1, n)
-		require.Equal(t, []byte("\n"), buf[:n])
+		require.NoError(t, requireRead(t, r, buf, "\n"))
+		require.ErrorIs(t, requireRead(t, r, buf, ""), io.EOF)
 
 		// buffer must be empty
-		require.Equal(t, 0, bufio.Buffered())
+		require.Zero(t, br.Buffered())
 	})
 
 	t.Run("Case3", func(t *testing.T) {
 		reader, writer := io.Pipe()
 		buf := make([]byte, 255)
-		bufio := bufio.NewReader(reader)
-		r := smtpreader.NewDot(bufio, 0)
+		br := bufio.NewReader(reader)
+		r := smtpreader.NewDot(br, 0)
 
-		// only t is read
 		write(writer, "testtest\r\n.")
-		n, err = r.Read(buf)
-		require.NoError(t, err)
-		require.Equal(t, 8, n)
-		require.Equal(t, []byte("testtest"), buf[:n])
+		require.NoError(t, requireRead(t, r, buf, "testtest"))
 
 		// reader returns ending
 		write(writer, "\r\n")
-		n, err = r.Read(buf)
-		require.Error(t, io.EOF, err)
-		require.Equal(t, 2, n)
-		require.Equal(t, []byte("\r\n"), buf[:n])
+		require.NoError(t, requireRead(t, r, buf, "\r\n"))
+		require.ErrorIs(t, requireRead(t, r, buf, ""), io.EOF)
 
 		// buffer must be empty
-		require.Equal(t, 0, bufio.Buffered())
+		require.Zero(t, br.Buffered())
 	})
 
-	t.Run("Case4", func(t *testing.T) {
-		reader, writer := io.Pipe()
-		buf := make([]byte, 255)
-		bufio := bufio.NewReader(reader)
-		r := smtpreader.NewDot(bufio, 0)
+	// the writer is closed (with an error) before the end marker is complete
+	errTest := errors.New("test")
+	for _, tc := range []struct {
+		name, in          string
+		closeErr, wantErr error
+	}{
+		{"Case4", "testtest\r\n.", nil, io.ErrUnexpectedEOF},
+		{"Case4RandomError", "testtest\r\n.", errTest, errTest},
+		{"Case5", "testtest\r\n", nil, io.ErrUnexpectedEOF},
+		{"Case5RandomError", "testtest\r\n", errTest, errTest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reader, writer := io.Pipe()
+			buf := make([]byte, 255)
+			br := bufio.NewReader(reader)
+			r := smtpreader.NewDot(br, 0)
 
-		// only t is read
-		write(writer, "testtest\r\n.")
-		n, err = r.Read(buf)
-		require.NoError(t, err)
-		require.Equal(t, 8, n)
-		require.Equal(t, []byte("testtest"), buf[:n])
+			write(writer, tc.in)
+			require.NoError(t, requireRead(t, r, buf, "testtest"))
 
-		// close writer
-		_ = writer.Close()
+			_ = writer.CloseWithError(tc.closeErr)
+			require.NoError(t, requireRead(t, r, buf, "\r\n"))
+			require.ErrorIs(t, requireRead(t, r, buf, ""), tc.wantErr)
 
-		n, err = r.Read(buf)
-		require.Error(t, io.ErrUnexpectedEOF, err)
-		require.Equal(t, 2, n)
-		require.Equal(t, []byte("\r\n"), buf[:n])
-
-		// buffer must be empty
-		require.Equal(t, 0, bufio.Buffered())
-	})
-
-	t.Run("Case4RandomError", func(t *testing.T) {
-		reader, writer := io.Pipe()
-		buf := make([]byte, 255)
-		bufio := bufio.NewReader(reader)
-		r := smtpreader.NewDot(bufio, 0)
-
-		// only t is read
-		write(writer, "testtest\r\n.")
-		n, err = r.Read(buf)
-		require.NoError(t, err)
-		require.Equal(t, 8, n)
-		require.Equal(t, []byte("testtest"), buf[:n])
-
-		// close writer
-		serr := errors.New("test")
-		_ = writer.CloseWithError(serr)
-
-		n, err = r.Read(buf)
-		require.Error(t, serr, err)
-		require.Equal(t, 2, n)
-		require.Equal(t, []byte("\r\n"), buf[:n])
-
-		// buffer must be empty
-		require.Equal(t, 0, bufio.Buffered())
-	})
-
-	t.Run("Case5", func(t *testing.T) {
-		reader, writer := io.Pipe()
-		buf := make([]byte, 255)
-		bufio := bufio.NewReader(reader)
-		r := smtpreader.NewDot(bufio, 0)
-
-		// only t is read
-		write(writer, "testtest\r\n")
-		n, err = r.Read(buf)
-		require.NoError(t, err)
-		require.Equal(t, 8, n)
-		require.Equal(t, []byte("testtest"), buf[:n])
-
-		// close writer
-		_ = writer.Close()
-
-		n, err = r.Read(buf)
-		require.Error(t, io.ErrUnexpectedEOF, err)
-		require.Equal(t, 2, n)
-		require.Equal(t, []byte("\r\n"), buf[:n])
-
-		// buffer must be empty
-		require.Equal(t, 0, bufio.Buffered())
-	})
-
-	t.Run("Case5RandomError", func(t *testing.T) {
-		reader, writer := io.Pipe()
-		buf := make([]byte, 255)
-		bufio := bufio.NewReader(reader)
-		r := smtpreader.NewDot(bufio, 0)
-
-		// only t is read
-		write(writer, "testtest\r\n")
-		n, err = r.Read(buf)
-		require.NoError(t, err)
-		require.Equal(t, 8, n)
-		require.Equal(t, []byte("testtest"), buf[:n])
-
-		// close writer
-		serr := errors.New("test")
-		_ = writer.CloseWithError(serr)
-
-		n, err = r.Read(buf)
-		require.Error(t, serr, err)
-		require.Equal(t, 2, n)
-		require.Equal(t, []byte("\r\n"), buf[:n])
-
-		// buffer must be empty
-		require.Equal(t, 0, bufio.Buffered())
-	})
+			// buffer must be empty
+			require.Zero(t, br.Buffered())
+		})
+	}
 }
 
 // TestDotReaderNoBlockAfterEnd verifies that once the end marker has been

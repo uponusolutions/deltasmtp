@@ -2,7 +2,6 @@ package server_test
 
 import (
 	"errors"
-	"io"
 	"strings"
 	"testing"
 
@@ -79,45 +78,38 @@ func TestServer_AddressValidator(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	cmd := func(line, want string) {
-		t.Helper()
-		_, _ = io.WriteString(c, line+"\r\n")
-		scanOk(t, c, scanner)
-		require.True(t, strings.HasPrefix(scanner.Text(), want), "%q: got %q, want prefix %q", line, scanner.Text(), want)
-	}
-
 	// MAIL: plain errors, custom statuses and positive statuses all reject.
-	cmd("MAIL FROM:<bad@example.org>", "553 5.1.7 ")
-	cmd("MAIL FROM:<custom@example.org>", "550 5.7.1 ")
-	cmd("MAIL FROM:<positive@example.org>", "553 5.1.7 ")
+	expect(t, c, scanner, "MAIL FROM:<bad@example.org>", "553 5.1.7 ")
+	expect(t, c, scanner, "MAIL FROM:<custom@example.org>", "550 5.7.1 ")
+	expect(t, c, scanner, "MAIL FROM:<positive@example.org>", "553 5.1.7 ")
 
 	// The null reverse-path is no address.
 	seen = nil
-	cmd("MAIL FROM:<>", "250 ")
+	expect(t, c, scanner, "MAIL FROM:<>", "250 ")
 	require.Empty(t, seen)
-	cmd("RSET", "250 ")
+	expect(t, c, scanner, "RSET", "250 ")
 
 	// RCPT, a rejected recipient is not counted.
-	cmd("MAIL FROM:<alice@example.org>", "250 ")
-	cmd("RCPT TO:<bad@example.org>", "553 5.1.3 ")
-	cmd("RCPT TO:<custom@example.org>", "550 5.7.1 ")
-	cmd("DATA", "502 5.5.1 ")
-	cmd("RCPT TO:<bob@example.org>", "250 ")
+	expect(t, c, scanner, "MAIL FROM:<alice@example.org>", "250 ")
+	expect(t, c, scanner, "RCPT TO:<bad@example.org>", "553 5.1.3 ")
+	expect(t, c, scanner, "RCPT TO:<custom@example.org>", "550 5.7.1 ")
+	expect(t, c, scanner, "DATA", "502 5.5.1 ")
+	expect(t, c, scanner, "RCPT TO:<bob@example.org>", "250 ")
 
 	// VRFY
-	cmd("VRFY <bad@example.org>", "553 5.1.3 ")
-	cmd("VRFY <custom@example.org>", "550 5.7.1 ")
-	cmd("VRFY <bob@example.org>", "252 ")
+	expect(t, c, scanner, "VRFY <bad@example.org>", "553 5.1.3 ")
+	expect(t, c, scanner, "VRFY <custom@example.org>", "550 5.7.1 ")
+	expect(t, c, scanner, "VRFY <bob@example.org>", "252 ")
 
 	// The validator gets the canonical form of the address.
 	seen = nil
-	cmd("RSET", "250 ")
-	cmd(`MAIL FROM:<"carol"@example.org>`, "250 ")
-	cmd(`RCPT TO:<"a b"@example.org>`, "250 ")
+	expect(t, c, scanner, "RSET", "250 ")
+	expect(t, c, scanner, `MAIL FROM:<"carol"@example.org>`, "250 ")
+	expect(t, c, scanner, `RCPT TO:<"a b"@example.org>`, "250 ")
 	require.Equal(t, []string{"carol@example.org", `"a b"@example.org`}, seen)
 
-	cmd("DATA", "354 ")
-	cmd("Hey\r\n.", "250 ")
+	expect(t, c, scanner, "DATA", "354 ")
+	expect(t, c, scanner, "Hey\r\n.", "250 ")
 	require.Len(t, be.messages, 1)
 	require.Equal(t, []string{`"a b"@example.org`}, be.messages[0].To)
 }
@@ -130,19 +122,12 @@ func TestServer_DefaultAddressValidator(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	cmd := func(line, want string) {
-		t.Helper()
-		_, _ = io.WriteString(c, line+"\r\n")
-		scanOk(t, c, scanner)
-		require.True(t, strings.HasPrefix(scanner.Text(), want), "%q: got %q, want prefix %q", line, scanner.Text(), want)
-	}
-
 	rlo := string(rune(0x202E))
-	cmd("MAIL FROM:<a"+rlo+"b@example.org> SMTPUTF8", "553 5.1.7 ")
-	cmd("MAIL FROM:<jösé@example.org> SMTPUTF8", "250 ")
-	cmd("RCPT TO:<c"+rlo+"d@example.org>", "553 5.1.3 ")
-	cmd("RCPT TO:<bob@bücher.example>", "250 ")
-	cmd("VRFY <e"+rlo+"f@example.org> SMTPUTF8", "553 5.1.3 ")
+	expect(t, c, scanner, "MAIL FROM:<a"+rlo+"b@example.org> SMTPUTF8", "553 5.1.7 ")
+	expect(t, c, scanner, "MAIL FROM:<jösé@example.org> SMTPUTF8", "250 ")
+	expect(t, c, scanner, "RCPT TO:<c"+rlo+"d@example.org>", "553 5.1.3 ")
+	expect(t, c, scanner, "RCPT TO:<bob@bücher.example>", "250 ")
+	expect(t, c, scanner, "VRFY <e"+rlo+"f@example.org> SMTPUTF8", "553 5.1.3 ")
 }
 
 // With the address validator disabled everything the parser accepts is passed on.
@@ -156,19 +141,12 @@ func TestServer_AddressValidatorDisabled(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	cmd := func(line, want string) {
-		t.Helper()
-		_, _ = io.WriteString(c, line+"\r\n")
-		scanOk(t, c, scanner)
-		require.True(t, strings.HasPrefix(scanner.Text(), want), "%q: got %q, want prefix %q", line, scanner.Text(), want)
-	}
-
 	rlo := string(rune(0x202E))
-	cmd("MAIL FROM:<a"+rlo+"b@example.org> SMTPUTF8", "250 ")
-	cmd("RCPT TO:<c"+rlo+"d@example.org>", "250 ")
-	cmd("VRFY <e"+rlo+"f@example.org> SMTPUTF8", "252 ")
-	cmd("DATA", "354 ")
-	cmd("Hey\r\n.", "250 ")
+	expect(t, c, scanner, "MAIL FROM:<a"+rlo+"b@example.org> SMTPUTF8", "250 ")
+	expect(t, c, scanner, "RCPT TO:<c"+rlo+"d@example.org>", "250 ")
+	expect(t, c, scanner, "VRFY <e"+rlo+"f@example.org> SMTPUTF8", "252 ")
+	expect(t, c, scanner, "DATA", "354 ")
+	expect(t, c, scanner, "Hey\r\n.", "250 ")
 	require.Len(t, be.messages, 1)
 	require.Equal(t, "a"+rlo+"b@example.org", be.messages[0].From)
 }

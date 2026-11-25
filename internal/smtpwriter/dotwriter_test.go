@@ -7,102 +7,54 @@ package smtpwriter_test
 import (
 	"bufio"
 	"bytes"
+	"io"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"github.com/uponusolutions/deltasmtp/internal/smtpwriter"
 )
 
+// writeChunks writes each chunk to w and requires it to be fully written.
+func writeChunks(t *testing.T, w io.Writer, chunks ...string) {
+	t.Helper()
+	for _, c := range chunks {
+		n, err := w.Write([]byte(c))
+		require.NoError(t, err)
+		require.Equal(t, len(c), n)
+	}
+}
+
 func TestDotWriter(t *testing.T) {
-	t.Run("Encode", func(t *testing.T) {
-		var buf bytes.Buffer
-		d := smtpwriter.NewDot(bufio.NewWriter(&buf))
-		n, err := d.Write([]byte("abc\n.def\n..ghi\n.jkl\n."))
-		if n != 21 || err != nil {
-			t.Fatalf("Write: %d, %s", n, err)
-		}
-		require.NoError(t, d.Close())
-		want := "abc\r\n..def\r\n...ghi\r\n..jkl\r\n..\r\n.\r\n"
-		if s := buf.String(); s != want {
-			t.Fatalf("wrote %q", s)
-		}
-	})
-
-	t.Run("EncodeNoError", func(t *testing.T) {
-		var buf bytes.Buffer
-		d := smtpwriter.NewDot(bufio.NewWriter(&buf))
-		n, err := d.Write([]byte("abc\r\n.def\r\n..ghi\r\n.jkl\r\n."))
-		if n != 25 || err != nil {
-			t.Fatalf("Write: %d, %s", n, err)
-		}
-		_ = d.Close()
-		want := "abc\r\n..def\r\n...ghi\r\n..jkl\r\n..\r\n.\r\n"
-		if s := buf.String(); s != want {
-			t.Fatalf("wrote %q", s)
-		}
-	})
-
-	t.Run("EncodeSeparateWrites", func(t *testing.T) {
-		var buf bytes.Buffer
-		d := smtpwriter.NewDot(bufio.NewWriter(&buf))
-		n, err := d.Write([]byte("abc\r"))
-		if n != 4 || err != nil {
-			t.Fatalf("Write: %d, %s", n, err)
-		}
-
-		n, err = d.Write([]byte("\n.def\r\n..ghi\r\n.jkl\r\n."))
-		if n != 21 || err != nil {
-			t.Fatalf("Write: %d, %s", n, err)
-		}
-
-		_ = d.Close()
-		want := "abc\r\n..def\r\n...ghi\r\n..jkl\r\n..\r\n.\r\n"
-		if s := buf.String(); s != want {
-			t.Fatalf("wrote %q", s)
-		}
-	})
-
-	t.Run("EncodeSeparateWritesEndsWithR", func(t *testing.T) {
-		var buf bytes.Buffer
-		d := smtpwriter.NewDot(bufio.NewWriter(&buf))
-		n, err := d.Write([]byte("abc\r"))
-		if n != 4 || err != nil {
-			t.Fatalf("Write: %d, %s", n, err)
-		}
-
-		n, err = d.Write([]byte("\n.def\r\n..ghi\r\n.jkl\r"))
-		if n != 19 || err != nil {
-			t.Fatalf("Write: %d, %s", n, err)
-		}
-
-		require.NoError(t, d.Close())
+	const encoded = "abc\r\n..def\r\n...ghi\r\n..jkl\r\n..\r\n.\r\n"
+	for _, tc := range []struct {
+		name   string
+		chunks []string
+		want   string
+	}{
+		{"Encode", []string{"abc\n.def\n..ghi\n.jkl\n."}, encoded},
+		{"EncodeNoError", []string{"abc\r\n.def\r\n..ghi\r\n.jkl\r\n."}, encoded},
+		{"EncodeSeparateWrites", []string{"abc\r", "\n.def\r\n..ghi\r\n.jkl\r\n."}, encoded},
 		// \r gets interpreted as line break
-		want := "abc\r\n..def\r\n...ghi\r\n..jkl\r\n.\r\n"
-		if s := buf.String(); s != want {
-			t.Fatalf("wrote %q", s)
-		}
-	})
-
-	t.Run("EncodeSeparateWritesContainsR", func(t *testing.T) {
-		var buf bytes.Buffer
-		d := smtpwriter.NewDot(bufio.NewWriter(&buf))
-		n, err := d.Write([]byte("abc\r"))
-		if n != 4 || err != nil {
-			t.Fatalf("Write: %d, %s", n, err)
-		}
-
-		n, err = d.Write([]byte("\n.def\r..ghi\r\n.jkl\r"))
-		if n != 18 || err != nil {
-			t.Fatalf("Write: %d, %s", n, err)
-		}
-
-		require.NoError(t, d.Close())
+		{
+			"EncodeSeparateWritesEndsWithR",
+			[]string{"abc\r", "\n.def\r\n..ghi\r\n.jkl\r"},
+			"abc\r\n..def\r\n...ghi\r\n..jkl\r\n.\r\n",
+		},
 		// \r gets interpreted as normal character
-		want := "abc\r\n..def\r..ghi\r\n..jkl\r\n.\r\n"
-		if s := buf.String(); s != want {
-			t.Fatalf("wrote %q", s)
-		}
-	})
+		{
+			"EncodeSeparateWritesContainsR",
+			[]string{"abc\r", "\n.def\r..ghi\r\n.jkl\r"},
+			"abc\r\n..def\r..ghi\r\n..jkl\r\n.\r\n",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			d := smtpwriter.NewDot(bufio.NewWriter(&buf))
+			writeChunks(t, d, tc.chunks...)
+			require.NoError(t, d.Close())
+			require.Equal(t, tc.want, buf.String())
+		})
+	}
 }
 
 // TestDotWriterLeadingDot checks that a dot at the very beginning of the
@@ -117,8 +69,7 @@ func TestDotWriterLeadingDot(t *testing.T) {
 	} {
 		var buf bytes.Buffer
 		d := smtpwriter.NewDot(bufio.NewWriter(&buf))
-		_, err := d.Write([]byte(tc.in))
-		require.NoError(t, err)
+		writeChunks(t, d, tc.in)
 		require.NoError(t, d.Close())
 		require.Equal(t, tc.want, buf.String(), "input %q", tc.in)
 	}
@@ -127,23 +78,14 @@ func TestDotWriterLeadingDot(t *testing.T) {
 func TestDotWriterCloseEmptyWrite(t *testing.T) {
 	var buf bytes.Buffer
 	d := smtpwriter.NewDot(bufio.NewWriter(&buf))
-	n, err := d.Write([]byte{})
-	if n != 0 || err != nil {
-		t.Fatalf("Write: %d, %s", n, err)
-	}
+	writeChunks(t, d, "")
 	require.NoError(t, d.Close())
-	want := "\r\n.\r\n"
-	if s := buf.String(); s != want {
-		t.Fatalf("wrote %q; want %q", s, want)
-	}
+	require.Equal(t, "\r\n.\r\n", buf.String())
 }
 
 func TestDotWriterCloseNoWrite(t *testing.T) {
 	var buf bytes.Buffer
 	d := smtpwriter.NewDot(bufio.NewWriter(&buf))
 	require.NoError(t, d.Close())
-	want := "\r\n.\r\n"
-	if s := buf.String(); s != want {
-		t.Fatalf("wrote %q; want %q", s, want)
-	}
+	require.Equal(t, "\r\n.\r\n", buf.String())
 }

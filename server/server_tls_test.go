@@ -5,7 +5,6 @@ import (
 	"crypto/tls"
 	"io"
 	"net"
-	"strings"
 	"testing"
 	"time"
 
@@ -14,204 +13,99 @@ import (
 	"github.com/uponusolutions/deltasmtp/tester"
 )
 
+const authPlain = "AUTH PLAIN AHVzZXJuYW1lAHBhc3N3b3Jk"
+
+// tlsConfig returns a server TLS config with a certificate for localhost.
+func tlsConfig(t *testing.T) *tls.Config {
+	t.Helper()
+	cert, err := tester.GenX509KeyPair("localhost")
+	require.NoError(t, err)
+	return &tls.Config{Certificates: []tls.Certificate{cert}}
+}
+
+// ehlo sends EHLO and reads the complete multiline reply.
+func ehlo(t *testing.T, c net.Conn, scanner *bufio.Scanner) {
+	t.Helper()
+	requirePrefix(t, send(t, c, scanner, "EHLO localhost"), "250-")
+	readCaps(t, c, scanner)
+}
+
 func TestServerEnforceSecureConnection(t *testing.T) {
 	_, _, c, scanner, caps := testServerEhlo(t, nil, server.WithEnforceSecureConnection(true))
+	require.True(t, caps["AUTH PLAIN"], "AUTH PLAIN capability is missing when auth is enabled")
 
-	if _, ok := caps["AUTH PLAIN"]; !ok {
-		t.Fatal("AUTH PLAIN capability is missing when auth is enabled")
-	}
-
-	_, _ = io.WriteString(c, "AUTH PLAIN AHVzZXJuYW1lAHBhc3N3b3Jk\r\n")
-	scan(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "530 ") {
-		t.Fatal("Should enforce STARTTLS:", scanner.Text())
-	}
+	// STARTTLS is enforced
+	expect(t, c, scanner, authPlain, "530 ")
 }
 
 func TestServerEnforceSecureConnectionImplicitTls(t *testing.T) {
-	cert, err := tester.GenX509KeyPair("localhost")
-	require.NoError(t, err)
-
-	be := new(backend)
-	be.clientTls = true
-
-	_, _, c, scanner, caps := testServerEhlo(
-		t,
-		be,
+	be := &backend{clientTls: true}
+	_, _, c, scanner, caps := testServerEhlo(t, be,
 		server.WithEnforceSecureConnection(true),
 		server.WithImplicitTLS(true),
-		server.WithTLSConfig(&tls.Config{
-			Certificates: []tls.Certificate{cert},
-		}),
+		server.WithTLSConfig(tlsConfig(t)),
 	)
+	require.True(t, caps["AUTH PLAIN"], "AUTH PLAIN capability is missing when auth is enabled")
 
-	if _, ok := caps["AUTH PLAIN"]; !ok {
-		t.Fatal("AUTH PLAIN capability is missing when auth is enabled")
-	}
-
-	_, _ = io.WriteString(c, "AUTH PLAIN AHVzZXJuYW1lAHBhc3N3b3Jk\r\n")
-	scan(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "235 ") {
-		t.Fatal("Should succeed:", scanner.Text())
-	}
+	expect(t, c, scanner, authPlain, "235 ")
 }
 
 func TestServerEnforceSecureConnectionStartTls(t *testing.T) {
-	cert, err := tester.GenX509KeyPair("localhost")
-	require.NoError(t, err)
-
-	_, _, c, scanner, caps := testServerEhlo(
-		t,
-		nil,
+	_, _, c, scanner, caps := testServerEhlo(t, nil,
 		server.WithEnforceSecureConnection(true),
-		server.WithTLSConfig(&tls.Config{
-			Certificates: []tls.Certificate{cert},
-		}),
+		server.WithTLSConfig(tlsConfig(t)),
 	)
+	require.True(t, caps["AUTH PLAIN"], "AUTH PLAIN capability is missing when auth is enabled")
 
-	if _, ok := caps["AUTH PLAIN"]; !ok {
-		t.Fatal("AUTH PLAIN capability is missing when auth is enabled")
-	}
+	// STARTTLS first
+	expect(t, c, scanner, authPlain, "530 ")
+}
 
-	_, _ = io.WriteString(c, "AUTH PLAIN AHVzZXJuYW1lAHBhc3N3b3Jk\r\n")
-	scan(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "530 ") {
-		t.Fatal("STARTTLS first expected:", scanner.Text())
-	}
+// requireStartTLSAuth upgrades the connection with STARTTLS and authenticates.
+func requireStartTLSAuth(t *testing.T, opts ...server.Option) {
+	t.Helper()
+	cfg := tlsConfig(t)
+	_, _, c, _, _ := testServerEhlo(t, nil, append(opts, server.WithTLSConfig(cfg))...)
+
+	// Read the reply unbuffered, the TLS handshake follows directly.
+	_, _ = io.WriteString(c, "STARTTLS\r\n")
+	buf := make([]byte, 30)
+	_, _ = c.Read(buf)
+	require.Equal(t, "220 2.0.0 Ready to start TLS\r\n", string(buf))
+
+	c = tls.Client(c, &tls.Config{InsecureSkipVerify: true, Certificates: cfg.Certificates})
+	scanner := bufio.NewScanner(c)
+
+	ehlo(t, c, scanner)
+	expect(t, c, scanner, authPlain, "235 ")
 }
 
 func TestServerEnforceSecureConnectionStartTlsStarttls(t *testing.T) {
-	cert, err := tester.GenX509KeyPair("localhost")
-	require.NoError(t, err)
-
-	_, _, c, _, _ := testServerEhlo(
-		t,
-		nil,
-		server.WithEnforceSecureConnection(true),
-		server.WithTLSConfig(&tls.Config{
-			Certificates: []tls.Certificate{cert},
-		}),
-	)
-
-	_, _ = io.WriteString(c, "STARTTLS\r\n")
-
-	buf := make([]byte, 30)
-	_, _ = c.Read(buf)
-
-	if string(buf) != "220 2.0.0 Ready to start TLS\r\n" {
-		t.Fatal("Ready to start expected:", string(buf))
-	}
-
-	// Upgrade to TLS
-	c = tls.Client(c, &tls.Config{InsecureSkipVerify: true, Certificates: []tls.Certificate{cert}})
-
-	scanner := bufio.NewScanner(c)
-
-	_, _ = io.WriteString(c, "EHLO localhost\r\n")
-	scan(t, c, scanner)
-	for strings.HasPrefix(scanner.Text(), "250-") {
-		scan(t, c, scanner)
-	}
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("hello expected expected:", scanner.Text())
-	}
-
-	_, _ = io.WriteString(c, "AUTH PLAIN AHVzZXJuYW1lAHBhc3N3b3Jk\r\n")
-	scan(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "235 ") {
-		t.Fatal("Should succeed:", scanner.Text())
-	}
+	requireStartTLSAuth(t, server.WithEnforceSecureConnection(true))
 }
 
 func TestServerNoEnforceSecureConnectionStartTlsStarttls(t *testing.T) {
-	cert, err := tester.GenX509KeyPair("localhost")
-	require.NoError(t, err)
-
-	_, _, c, _, _ := testServerEhlo(
-		t,
-		nil,
-		server.WithEnforceAuthentication(true),
-		server.WithEnforceSecureConnection(false),
-		server.WithTLSConfig(&tls.Config{
-			Certificates: []tls.Certificate{cert},
-		}),
-	)
-
-	_, _ = io.WriteString(c, "STARTTLS\r\n")
-
-	buf := make([]byte, 30)
-	_, _ = c.Read(buf)
-
-	if string(buf) != "220 2.0.0 Ready to start TLS\r\n" {
-		t.Fatal("Ready to start expected:", string(buf))
-	}
-
-	// Upgrade to TLS
-	c = tls.Client(c, &tls.Config{InsecureSkipVerify: true, Certificates: []tls.Certificate{cert}})
-
-	scanner := bufio.NewScanner(c)
-
-	_, _ = io.WriteString(c, "EHLO localhost\r\n")
-	scan(t, c, scanner)
-	for strings.HasPrefix(scanner.Text(), "250-") {
-		scan(t, c, scanner)
-	}
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("hello expected expected:", scanner.Text())
-	}
-
-	_, _ = io.WriteString(c, "AUTH PLAIN AHVzZXJuYW1lAHBhc3N3b3Jk\r\n")
-	scan(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "235 ") {
-		t.Fatal("Should succeed:", scanner.Text())
-	}
+	requireStartTLSAuth(t, server.WithEnforceAuthentication(true), server.WithEnforceSecureConnection(false))
 }
 
 // RFC 3207 section 4.2: the server discards the EHLO knowledge and the
 // authentication after STARTTLS.
 func TestServerStartTlsDiscardsSettings(t *testing.T) {
-	cert, err := tester.GenX509KeyPair("localhost")
-	require.NoError(t, err)
+	_, _, c, scanner, _ := testServerEhlo(t, nil, server.WithTLSConfig(tlsConfig(t)))
 
-	_, _, c, scanner, _ := testServerEhlo(
-		t,
-		nil,
-		server.WithTLSConfig(&tls.Config{
-			Certificates: []tls.Certificate{cert},
-		}),
-	)
-
-	_, _ = io.WriteString(c, "AUTH PLAIN AHVzZXJuYW1lAHBhc3N3b3Jk\r\n")
-	scan(t, c, scanner)
-	require.Equal(t, "235 2.0.0 Authentication succeeded", scanner.Text())
-
-	_, _ = io.WriteString(c, "STARTTLS\r\n")
-	scan(t, c, scanner)
-	require.Equal(t, "220 2.0.0 Ready to start TLS", scanner.Text())
+	require.Equal(t, "235 2.0.0 Authentication succeeded", send(t, c, scanner, authPlain))
+	require.Equal(t, "220 2.0.0 Ready to start TLS", send(t, c, scanner, "STARTTLS"))
 
 	c = tls.Client(c, &tls.Config{InsecureSkipVerify: true})
 	scanner = bufio.NewScanner(c)
 
 	// The auth mechanisms from the EHLO before STARTTLS are discarded.
-	_, _ = io.WriteString(c, "HELO localhost\r\n")
-	scan(t, c, scanner)
-	require.True(t, strings.HasPrefix(scanner.Text(), "250 "), scanner.Text())
-
-	_, _ = io.WriteString(c, "AUTH PLAIN AHVzZXJuYW1lAHBhc3N3b3Jk\r\n")
-	scan(t, c, scanner)
-	require.Equal(t, "502 5.7.0 Authentication not supported", scanner.Text())
+	expect(t, c, scanner, "HELO localhost", "250 ")
+	require.Equal(t, "502 5.7.0 Authentication not supported", send(t, c, scanner, authPlain))
 
 	// The authentication is revoked, the client has to authenticate again.
-	_, _ = io.WriteString(c, "EHLO localhost\r\n")
-	scan(t, c, scanner)
-	for strings.HasPrefix(scanner.Text(), "250-") {
-		scan(t, c, scanner)
-	}
-	require.True(t, strings.HasPrefix(scanner.Text(), "250 "), scanner.Text())
-
-	_, _ = io.WriteString(c, "AUTH PLAIN AHVzZXJuYW1lAHBhc3N3b3Jk\r\n")
-	scan(t, c, scanner)
-	require.Equal(t, "235 2.0.0 Authentication succeeded", scanner.Text())
+	ehlo(t, c, scanner)
+	require.Equal(t, "235 2.0.0 Authentication succeeded", send(t, c, scanner, authPlain))
 }
 
 // requireClosedWithin checks that the server closes c within d.
@@ -227,12 +121,9 @@ func requireClosedWithin(t *testing.T, c net.Conn, d time.Duration) {
 // A client that never starts the implicit TLS handshake is disconnected after the
 // TLS handshake timeout, not the command timeout.
 func TestServerTLSHandshakeTimeoutImplicitTLS(t *testing.T) {
-	cert, err := tester.GenX509KeyPair("localhost")
-	require.NoError(t, err)
-
 	_, _, c, _ := testServer(t, nil,
 		server.WithImplicitTLS(true),
-		server.WithTLSConfig(&tls.Config{Certificates: []tls.Certificate{cert}}),
+		server.WithTLSConfig(tlsConfig(t)),
 		server.WithTLSHandshakeTimeout(100*time.Millisecond))
 	defer func() { _ = c.Close() }()
 
@@ -242,17 +133,11 @@ func TestServerTLSHandshakeTimeoutImplicitTLS(t *testing.T) {
 // A client that never completes the STARTTLS handshake is disconnected after the
 // TLS handshake timeout, not the command timeout.
 func TestServerTLSHandshakeTimeoutStartTLS(t *testing.T) {
-	cert, err := tester.GenX509KeyPair("localhost")
-	require.NoError(t, err)
-
 	_, _, c, scanner, _ := testServerEhlo(t, nil,
-		server.WithTLSConfig(&tls.Config{Certificates: []tls.Certificate{cert}}),
+		server.WithTLSConfig(tlsConfig(t)),
 		server.WithTLSHandshakeTimeout(100*time.Millisecond))
 	defer func() { _ = c.Close() }()
 
-	_, _ = io.WriteString(c, "STARTTLS\r\n")
-	scanOk(t, c, scanner)
-	require.True(t, strings.HasPrefix(scanner.Text(), "220 "), scanner.Text())
-
+	expect(t, c, scanner, "STARTTLS", "220 ")
 	requireClosedWithin(t, c, 2*time.Second)
 }

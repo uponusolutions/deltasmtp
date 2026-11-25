@@ -10,13 +10,13 @@ import (
 	"io"
 	"log/slog"
 	"net"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/uponusolutions/deltasmtp"
 	"github.com/uponusolutions/deltasmtp/server"
@@ -224,118 +224,82 @@ func (m *mockError) Timeout() bool  { return m.timeout }
 func (*mockError) Temporary() bool  { return false }
 
 func testServer(t *testing.T, bei *backend, opts ...server.Option) (be *backend, s *server.Server, c net.Conn, scanner *bufio.Scanner) {
-	if bei == nil {
+	t.Helper()
+	be = bei
+	if be == nil {
 		be = new(backend)
-	} else {
-		be = bei
 	}
 
-	curOpts := []server.Option{
+	s = server.New(append([]server.Option{
 		server.WithAddr("127.0.0.1:0"),
 		server.WithBackend(be),
 		server.WithHostname("localhost"),
-	}
-
-	curOpts = append(curOpts, opts...)
-
-	s = server.New(
-		curOpts...,
-	)
-
-	ctx := context.Background()
+	}, opts...)...)
 
 	l, err := s.Listen()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	go func() {
 		// nolint: revive
-		_ = s.Serve(ctx, l)
+		_ = s.Serve(context.Background(), l)
 	}()
 
 	if be.clientTls {
-		c, err = tls.Dial("tcp", l.Addr().String(), &tls.Config{
-			InsecureSkipVerify: true,
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
+		c, err = tls.Dial("tcp", l.Addr().String(), &tls.Config{InsecureSkipVerify: true})
 	} else {
 		c, err = net.Dial("tcp", l.Addr().String())
-		if err != nil {
-			t.Fatal(err)
-		}
 	}
+	require.NoError(t, err)
 
-	scanner = bufio.NewScanner(c)
-	return be, s, c, scanner
+	return be, s, c, bufio.NewScanner(c)
 }
 
 func testServerGreeted(t *testing.T, bei *backend, opts ...server.Option) (be *backend, s *server.Server, c net.Conn, scanner *bufio.Scanner) {
+	t.Helper()
 	be, s, c, scanner = testServer(t, bei, opts...)
-
-	scanOk(t, c, scanner)
-	if scanner.Text() != "220 localhost ESMTP Service Ready" {
-		t.Fatal("Invalid greeting:", scanner.Text())
-	}
-
+	require.Equal(t, "220 localhost ESMTP Service Ready", readReply(t, c, scanner))
 	return be, s, c, scanner
 }
 
 // nolint: revive
 func testServerEhlo(t *testing.T, bei *backend, opts ...server.Option) (be *backend, s *server.Server, c net.Conn, scanner *bufio.Scanner, caps map[string]bool) {
+	t.Helper()
 	be, s, c, scanner = testServerGreeted(t, bei, opts...)
-
-	_, _ = io.WriteString(c, "EHLO localhost\r\n")
-
-	scanOk(t, c, scanner)
-	if scanner.Text() != "250-localhost greets localhost" {
-		t.Fatal("Invalid EHLO response:", scanner.Text())
-	}
-
-	expectedCaps := []string{"PIPELINING", "8BITMIME"}
-	caps = make(map[string]bool)
-
-	for scan(t, c, scanner) {
-		s := scanner.Text()
-
-		if after, ok := strings.CutPrefix(s, "250 "); ok {
-			caps[after] = true
-			break
-		}
-		if !strings.HasPrefix(s, "250-") {
-			t.Fatal("Invalid capability response:", s)
-		}
-		caps[strings.TrimPrefix(s, "250-")] = true
-	}
-
-	for _, cap := range expectedCaps {
-		if !caps[cap] {
-			t.Fatal("Missing capability:", cap)
-		}
-	}
-
+	require.Equal(t, "250-localhost greets localhost", send(t, c, scanner, "EHLO localhost"))
+	caps = readCaps(t, c, scanner)
+	require.True(t, caps["PIPELINING"], "missing capability PIPELINING")
+	require.True(t, caps["8BITMIME"], "missing capability 8BITMIME")
 	return be, s, c, scanner, caps
 }
 
-func scanOk(t *testing.T, c net.Conn, scanner *bufio.Scanner) {
-	if !scan(t, c, scanner) {
-		if err := scanner.Err(); err != nil {
-			t.Fatal("failed to read reply:", err)
+// readCaps reads the remaining lines of a multiline 250 EHLO reply and returns them as capability set.
+func readCaps(t *testing.T, c net.Conn, scanner *bufio.Scanner) map[string]bool {
+	t.Helper()
+	caps := make(map[string]bool)
+	for {
+		line := readReply(t, c, scanner)
+		if after, ok := strings.CutPrefix(line, "250 "); ok {
+			caps[after] = true
+			return caps
 		}
-		t.Fatal("server closed the connection while a reply was expected")
+		after, ok := strings.CutPrefix(line, "250-")
+		require.True(t, ok, "invalid capability response: %q", line)
+		caps[after] = true
+	}
+}
+
+func scanOk(t *testing.T, c net.Conn, scanner *bufio.Scanner) {
+	t.Helper()
+	if !scan(t, c, scanner) {
+		require.NoError(t, scanner.Err(), "failed to read reply")
+		require.FailNow(t, "server closed the connection while a reply was expected")
 	}
 }
 
 func scan(t *testing.T, c net.Conn, scanner *bufio.Scanner) bool {
 	t.Helper()
-
-	if err := c.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
-		t.Fatal("failed to set read deadline:", err)
-	}
+	require.NoError(t, c.SetReadDeadline(time.Now().Add(5*time.Second)))
 	defer func() { _ = c.SetReadDeadline(time.Time{}) }()
-
 	return scanner.Scan()
 }
 
@@ -343,6 +307,25 @@ func readReply(t *testing.T, c net.Conn, scanner *bufio.Scanner) string {
 	t.Helper()
 	scanOk(t, c, scanner)
 	return scanner.Text()
+}
+
+// send writes cmd terminated by CRLF and returns the next reply line.
+func send(t *testing.T, c net.Conn, scanner *bufio.Scanner, cmd string) string {
+	t.Helper()
+	_, _ = io.WriteString(c, cmd+"\r\n")
+	return readReply(t, c, scanner)
+}
+
+// expect sends cmd and requires the reply line to start with prefix.
+func expect(t *testing.T, c net.Conn, scanner *bufio.Scanner, cmd, prefix string) {
+	t.Helper()
+	requirePrefix(t, send(t, c, scanner, cmd), prefix)
+}
+
+// requirePrefix requires reply to start with prefix.
+func requirePrefix(t *testing.T, reply, prefix string) {
+	t.Helper()
+	require.True(t, strings.HasPrefix(reply, prefix), "expected reply starting with %q, got %q", prefix, reply)
 }
 
 func TestServerAcceptErrorHandling(t *testing.T) {
@@ -368,206 +351,77 @@ func TestServerAcceptErrorHandling(t *testing.T) {
 	l.Send(permanentError)
 	_ = s.Close()
 
-	serveError := <-done
-	if serveError == nil {
-		t.Fatal("Serve had exited without an expected error")
-	} else if serveError != permanentError {
-		t.Fatal("Unexpected error:", serveError)
-	}
-	if !strings.Contains(errorLog.String(), temporaryError.String()) {
-		t.Fatal("Missing temporary error in log output:", errorLog.String())
-	}
+	require.ErrorIs(t, <-done, permanentError)
+	require.Contains(t, errorLog.String(), temporaryError.String())
 }
 
 func TestServer_helo(t *testing.T) {
 	_, s, c, scanner := testServerGreeted(t, nil)
 	defer func() { _ = s.Close() }()
 
-	_, _ = io.WriteString(c, "HELO localhost\r\n")
-
-	if !strings.HasPrefix(readReply(t, c, scanner), "250 ") {
-		t.Fatal("Invalid HELO response:", scanner.Text())
-	}
+	expect(t, c, scanner, "HELO localhost", "250 ")
 }
 
 func testServerAuthenticated(t *testing.T, bei *backend, opts ...server.Option) (be *backend, s *server.Server, c net.Conn, scanner *bufio.Scanner) {
+	t.Helper()
 	be, s, c, scanner, caps := testServerEhlo(t, bei, opts...)
+	require.True(t, caps["AUTH PLAIN"], "AUTH PLAIN capability is missing when auth is enabled")
 
-	if _, ok := caps["AUTH PLAIN"]; !ok {
-		t.Fatal("AUTH PLAIN capability is missing when auth is enabled")
-	}
-
-	_, _ = io.WriteString(c, "AUTH PLAIN\r\n")
-	scanOk(t, c, scanner)
-	if scanner.Text() != "334 " {
-		t.Fatal("Invalid AUTH response:", scanner.Text())
-	}
-
-	_, _ = io.WriteString(c, "AHVzZXJuYW1lAHBhc3N3b3Jk\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "235 ") {
-		t.Fatal("Invalid AUTH response:", scanner.Text())
-	}
+	require.Equal(t, "334 ", send(t, c, scanner, "AUTH PLAIN"))
+	expect(t, c, scanner, "AHVzZXJuYW1lAHBhc3N3b3Jk", "235 ")
 
 	return be, s, c, scanner
 }
 
 func TestServerAuthTwice(t *testing.T) {
 	_, _, c, scanner, caps := testServerEhlo(t, nil)
+	require.True(t, caps["AUTH PLAIN"], "AUTH PLAIN capability is missing when auth is enabled")
 
-	if _, ok := caps["AUTH PLAIN"]; !ok {
-		t.Fatal("AUTH PLAIN capability is missing when auth is enabled")
-	}
-
-	_, _ = io.WriteString(c, "AUTH PLAIN AHVzZXJuYW1lAHBhc3N3b3Jk\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "235 ") {
-		t.Fatal("Invalid AUTH response:", scanner.Text())
-	}
-
-	_, _ = io.WriteString(c, "AUTH PLAIN AHVzZXJuYW1lAHBhc3N3b3Jk\r\n")
-	if !scan(t, c, scanner) {
-		t.Fatal("connection is closed?")
-	}
-
-	if !strings.HasPrefix(scanner.Text(), "503 5.5.1 Already authenticated") {
-		t.Fatal("Invalid AUTH response:", scanner.Text())
-	}
-
-	_, _ = io.WriteString(c, "AUTH PLAIN AHVzZXJuYW1lAHBhc3N3b3Jk\r\n")
-	if !scan(t, c, scanner) {
-		t.Fatal("connection is closed?")
-	}
-
-	if !strings.HasPrefix(scanner.Text(), "503 5.5.1 Already authenticated") {
-		t.Fatal("Invalid AUTH response:", scanner.Text())
-	}
+	expect(t, c, scanner, "AUTH PLAIN AHVzZXJuYW1lAHBhc3N3b3Jk", "235 ")
+	expect(t, c, scanner, "AUTH PLAIN AHVzZXJuYW1lAHBhc3N3b3Jk", "503 5.5.1 Already authenticated")
+	expect(t, c, scanner, "AUTH PLAIN AHVzZXJuYW1lAHBhc3N3b3Jk", "503 5.5.1 Already authenticated")
 }
 
 func TestServerAuthForbiddenInsideMailTransaction(t *testing.T) {
 	_, _, c, scanner, caps := testServerEhlo(t, nil)
+	require.True(t, caps["AUTH PLAIN"], "AUTH PLAIN capability is missing when auth is enabled")
 
-	if _, ok := caps["AUTH PLAIN"]; !ok {
-		t.Fatal("AUTH PLAIN capability is missing when auth is enabled")
-	}
-
-	_, _ = io.WriteString(c, "MAIL FROM:<alice@wonderland.book>\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid MAIL response:", scanner.Text())
-	}
-
-	_, _ = io.WriteString(c, "AUTH PLAIN AHVzZXJuYW1lAHBhc3N3b3Jk\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "502 ") {
-		t.Fatal("Invalid AUTH response:", scanner.Text())
-	}
+	expect(t, c, scanner, "MAIL FROM:<alice@wonderland.book>", "250 ")
+	expect(t, c, scanner, "AUTH PLAIN AHVzZXJuYW1lAHBhc3N3b3Jk", "502 ")
 }
 
 func TestServerAuthEnforced(t *testing.T) {
 	_, _, c, scanner, caps := testServerEhlo(t, nil, server.WithEnforceAuthentication(true))
+	require.True(t, caps["AUTH PLAIN"], "AUTH PLAIN capability is missing when auth is enabled")
 
-	if _, ok := caps["AUTH PLAIN"]; !ok {
-		t.Fatal("AUTH PLAIN capability is missing when auth is enabled")
-	}
-
-	_, _ = io.WriteString(c, "MAIL FROM:<alice@wonderland.book>\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "530 ") {
-		t.Fatal("Should require authentication:", scanner.Text())
-	}
-
-	_, _ = io.WriteString(c, "AUTH PLAIN AHVzZXJuYW1lAHBhc3N3b3Jk\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "235 ") {
-		t.Fatal("Invalid AUTH response:", scanner.Text())
-	}
-
-	_, _ = io.WriteString(c, "MAIL FROM:<alice@wonderland.book>\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Should accept mail after authentication:", scanner.Text())
-	}
-
-	_, _ = io.WriteString(c, "RSET\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Should accept rset:", scanner.Text())
-	}
-
-	_, _ = io.WriteString(c, "MAIL FROM:<alice@wonderland.book>\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Should still accept mail after rset:", scanner.Text())
-	}
-
-	_, _ = io.WriteString(c, "EHLO Test\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250-") {
-		t.Fatal("Should accept ehlo:", scanner.Text())
-	}
-
-	// ignore capabilities, already checked
-	for scan(t, c, scanner) {
-		s := scanner.Text()
-		if _, ok := strings.CutPrefix(s, "250 "); ok {
-			break
-		}
-	}
+	expect(t, c, scanner, "MAIL FROM:<alice@wonderland.book>", "530 ")
+	expect(t, c, scanner, "AUTH PLAIN AHVzZXJuYW1lAHBhc3N3b3Jk", "235 ")
+	expect(t, c, scanner, "MAIL FROM:<alice@wonderland.book>", "250 ")
+	expect(t, c, scanner, "RSET", "250 ")
+	expect(t, c, scanner, "MAIL FROM:<alice@wonderland.book>", "250 ")
+	expect(t, c, scanner, "EHLO Test", "250-")
+	readCaps(t, c, scanner) // ignore capabilities, already checked
 
 	// https://datatracker.ietf.org/doc/html/rfc5321#section-4.1.1.5
 	// EHLO should behave like RSET and does not reset AUTH in any way.
-	_, _ = io.WriteString(c, "MAIL FROM:<alice@wonderland.book>\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Should still accept mail after ehlo:", scanner.Text())
-	}
+	expect(t, c, scanner, "MAIL FROM:<alice@wonderland.book>", "250 ")
 }
 
 func TestServerAuthMultipleFailedAuth(t *testing.T) {
 	_, _, c, scanner, caps := testServerEhlo(t, nil, server.WithEnforceAuthentication(true))
+	require.True(t, caps["AUTH PLAIN"], "AUTH PLAIN capability is missing when auth is enabled")
 
-	if _, ok := caps["AUTH PLAIN"]; !ok {
-		t.Fatal("AUTH PLAIN capability is missing when auth is enabled")
-	}
-
-	_, _ = io.WriteString(c, "MAIL FROM:<alice@wonderland.book>\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "530 ") {
-		t.Fatal("Should require authentication:", scanner.Text())
-	}
-
-	_, _ = io.WriteString(c, "AUTH PLAIN invalid\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "454 4.7.0 Invalid base64 data") {
-		t.Fatal("Invalid AUTH response:", scanner.Text())
-	}
-
-	_, _ = io.WriteString(c, "AUTH PLAIN invalid\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "454 4.7.0 Invalid base64 data") {
-		t.Fatal("Invalid AUTH response:", scanner.Text())
-	}
+	expect(t, c, scanner, "MAIL FROM:<alice@wonderland.book>", "530 ")
+	expect(t, c, scanner, "AUTH PLAIN invalid", "454 4.7.0 Invalid base64 data")
+	expect(t, c, scanner, "AUTH PLAIN invalid", "454 4.7.0 Invalid base64 data")
 }
 
 func TestServerCancelSASL(t *testing.T) {
 	_, _, c, scanner, caps := testServerEhlo(t, nil)
+	require.True(t, caps["AUTH PLAIN"], "AUTH PLAIN capability is missing when auth is enabled")
 
-	if _, ok := caps["AUTH PLAIN"]; !ok {
-		t.Fatal("AUTH PLAIN capability is missing when auth is enabled")
-	}
-
-	_, _ = io.WriteString(c, "AUTH PLAIN\r\n")
-	scanOk(t, c, scanner)
-	if scanner.Text() != "334 " {
-		t.Fatal("Invalid AUTH response:", scanner.Text())
-	}
-
-	_, _ = io.WriteString(c, "*\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "501 ") {
-		t.Fatal("Invalid AUTH response:", scanner.Text())
-	}
+	require.Equal(t, "334 ", send(t, c, scanner, "AUTH PLAIN"))
+	expect(t, c, scanner, "*", "501 ")
 }
 
 func TestServerEmptyFrom1(t *testing.T) {
@@ -577,11 +431,7 @@ func TestServerEmptyFrom1(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	_, _ = io.WriteString(c, "MAIL FROM:\r\n")
-	scanOk(t, c, scanner)
-	if strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid MAIL response:", scanner.Text())
-	}
+	require.NotRegexp(t, "^250 ", send(t, c, scanner, "MAIL FROM:"))
 }
 
 func TestServerEmptyFrom2(t *testing.T) {
@@ -591,11 +441,7 @@ func TestServerEmptyFrom2(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	_, _ = io.WriteString(c, "MAIL FROM:<>\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid MAIL response:", scanner.Text())
-	}
+	expect(t, c, scanner, "MAIL FROM:<>", "250 ")
 }
 
 func TestServerPanicRecover(t *testing.T) {
@@ -611,11 +457,7 @@ func TestServerPanicRecover(t *testing.T) {
 
 	be.panicOnMail = true
 
-	_, _ = io.WriteString(c, "MAIL FROM:<alice@wonderland.book>\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "421 ") {
-		t.Fatal("Invalid MAIL response:", scanner.Text())
-	}
+	expect(t, c, scanner, "MAIL FROM:<alice@wonderland.book>", "421 ")
 }
 
 func TestServerSMTPUTF8(t *testing.T) {
@@ -625,11 +467,7 @@ func TestServerSMTPUTF8(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	_, _ = io.WriteString(c, "MAIL FROM:<alice@wonderland.book> SMTPUTF8\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid MAIL response:", scanner.Text())
-	}
+	expect(t, c, scanner, "MAIL FROM:<alice@wonderland.book> SMTPUTF8", "250 ")
 }
 
 func TestServerSMTPUTF8_NonASCIIAddress(t *testing.T) {
@@ -639,34 +477,27 @@ func TestServerSMTPUTF8_NonASCIIAddress(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	cmd := func(line, want string) {
-		t.Helper()
-		_, _ = io.WriteString(c, line+"\r\n")
-		scanOk(t, c, scanner)
-		require.True(t, strings.HasPrefix(scanner.Text(), want), "%q: got %q, want prefix %q", line, scanner.Text(), want)
-	}
-
 	// Without SMTPUTF8 non-ASCII addresses are rejected.
-	cmd("MAIL FROM:<jösé@example.org>", "550 5.6.7 ")
-	cmd("VRFY <jösé@example.org>", "550 5.6.8 ")
-	cmd("MAIL FROM:<alice@example.org>", "250 ")
-	cmd("RCPT TO:<jösé@example.org>", "553 5.6.7 ")
-	cmd("RCPT TO:<bob@bücher.example>", "553 5.6.7 ")
-	cmd("RSET", "250 ")
+	expect(t, c, scanner, "MAIL FROM:<jösé@example.org>", "550 5.6.7 ")
+	expect(t, c, scanner, "VRFY <jösé@example.org>", "550 5.6.8 ")
+	expect(t, c, scanner, "MAIL FROM:<alice@example.org>", "250 ")
+	expect(t, c, scanner, "RCPT TO:<jösé@example.org>", "553 5.6.7 ")
+	expect(t, c, scanner, "RCPT TO:<bob@bücher.example>", "553 5.6.7 ")
+	expect(t, c, scanner, "RSET", "250 ")
 
 	// With SMTPUTF8 they are accepted.
-	cmd("VRFY <jösé@example.org> SMTPUTF8", "252 ")
-	cmd("MAIL FROM:<jösé@example.org> SMTPUTF8", "250 ")
-	cmd("RCPT TO:<bob@bücher.example>", "250 ")
-	cmd("DATA", "354 ")
-	cmd("Hey\r\n.", "250 ")
+	expect(t, c, scanner, "VRFY <jösé@example.org> SMTPUTF8", "252 ")
+	expect(t, c, scanner, "MAIL FROM:<jösé@example.org> SMTPUTF8", "250 ")
+	expect(t, c, scanner, "RCPT TO:<bob@bücher.example>", "250 ")
+	expect(t, c, scanner, "DATA", "354 ")
+	expect(t, c, scanner, "Hey\r\n.", "250 ")
 	require.Len(t, be.messages, 1)
 	require.Equal(t, "jösé@example.org", be.messages[0].From)
 	require.Equal(t, []string{"bob@bücher.example"}, be.messages[0].To)
 
 	// The SMTPUTF8 parameter only applies to its own transaction.
-	cmd("MAIL FROM:<alice@example.org>", "250 ")
-	cmd("RCPT TO:<bob@bücher.example>", "553 5.6.7 ")
+	expect(t, c, scanner, "MAIL FROM:<alice@example.org>", "250 ")
+	expect(t, c, scanner, "RCPT TO:<bob@bücher.example>", "553 5.6.7 ")
 }
 
 func TestServerSMTPUTF8_Disabled(t *testing.T) {
@@ -676,11 +507,7 @@ func TestServerSMTPUTF8_Disabled(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	_, _ = io.WriteString(c, "MAIL FROM:<alice@wonderland.book> SMTPUTF8\r\n")
-	scanOk(t, c, scanner)
-	if strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid MAIL response:", scanner.Text())
-	}
+	require.NotRegexp(t, "^250 ", send(t, c, scanner, "MAIL FROM:<alice@wonderland.book> SMTPUTF8"))
 }
 
 func TestServer8BITMIME(t *testing.T) {
@@ -690,11 +517,7 @@ func TestServer8BITMIME(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	_, _ = io.WriteString(c, "MAIL FROM:<alice@wonderland.book> BODY=8bitMIME\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid MAIL response:", scanner.Text())
-	}
+	expect(t, c, scanner, "MAIL FROM:<alice@wonderland.book> BODY=8bitMIME", "250 ")
 }
 
 func TestServer_BODYInvalidValue(t *testing.T) {
@@ -704,11 +527,7 @@ func TestServer_BODYInvalidValue(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	_, _ = io.WriteString(c, "MAIL FROM:<alice@wonderland.book> BODY=RABIIT\r\n")
-	scanOk(t, c, scanner)
-	if strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid MAIL response:", scanner.Text())
-	}
+	require.NotRegexp(t, "^250 ", send(t, c, scanner, "MAIL FROM:<alice@wonderland.book> BODY=RABIIT"))
 }
 
 func TestServerUnknownArg(t *testing.T) {
@@ -718,11 +537,7 @@ func TestServerUnknownArg(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	_, _ = io.WriteString(c, "MAIL FROM:<alice@wonderland.book> RABIIT\r\n")
-	scanOk(t, c, scanner)
-	if strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid MAIL response:", scanner.Text())
-	}
+	require.NotRegexp(t, "^250 ", send(t, c, scanner, "MAIL FROM:<alice@wonderland.book> RABIIT"))
 }
 
 func TestServerBadSize(t *testing.T) {
@@ -732,11 +547,7 @@ func TestServerBadSize(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	_, _ = io.WriteString(c, "MAIL FROM:<alice@wonderland.book> SIZE=rabbit\r\n")
-	scanOk(t, c, scanner)
-	if strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid MAIL response:", scanner.Text())
-	}
+	require.NotRegexp(t, "^250 ", send(t, c, scanner, "MAIL FROM:<alice@wonderland.book> SIZE=rabbit"))
 }
 
 func TestServerTooBig(t *testing.T) {
@@ -746,11 +557,7 @@ func TestServerTooBig(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	_, _ = io.WriteString(c, "MAIL FROM:<alice@wonderland.book> SIZE=4294967295\r\n")
-	scanOk(t, c, scanner)
-	if strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid MAIL response:", scanner.Text())
-	}
+	require.NotRegexp(t, "^250 ", send(t, c, scanner, "MAIL FROM:<alice@wonderland.book> SIZE=4294967295"))
 }
 
 func TestServerEmptyTo(t *testing.T) {
@@ -760,17 +567,8 @@ func TestServerEmptyTo(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	_, _ = io.WriteString(c, "MAIL FROM:<root@nsa.gov>\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid MAIL response:", scanner.Text())
-	}
-
-	_, _ = io.WriteString(c, "RCPT TO:\r\n")
-	scanOk(t, c, scanner)
-	if strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid RCPT response:", scanner.Text())
-	}
+	expect(t, c, scanner, "MAIL FROM:<root@nsa.gov>", "250 ")
+	require.NotRegexp(t, "^250 ", send(t, c, scanner, "RCPT TO:"))
 }
 
 func TestServerQuotedAddress(t *testing.T) {
@@ -780,56 +578,22 @@ func TestServerQuotedAddress(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	_, _ = io.WriteString(c, "MAIL FROM:<\"root\"@nsa.gov>\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid MAIL response:", scanner.Text())
-	}
-
-	for _, rcpt := range []string{
-		`<"x> NOTIFY=NEVER ORCPT=rfc822;y"@example.org>`,
-		`<"user@internal"@example.org>`,
-	} {
-		_, _ = io.WriteString(c, "RCPT TO:"+rcpt+"\r\n")
-		scanOk(t, c, scanner)
-		if !strings.HasPrefix(scanner.Text(), "250 ") {
-			t.Fatal("Invalid RCPT response:", scanner.Text())
-		}
-	}
-
+	expect(t, c, scanner, "MAIL FROM:<\"root\"@nsa.gov>", "250 ")
+	expect(t, c, scanner, `RCPT TO:<"x> NOTIFY=NEVER ORCPT=rfc822;y"@example.org>`, "250 ")
+	expect(t, c, scanner, `RCPT TO:<"user@internal"@example.org>`, "250 ")
 	for _, rcpt := range []string{"<a@b@c>", "a@b@c", "<a..b@example.org>", "<a@example.org>x"} {
-		_, _ = io.WriteString(c, "RCPT TO:"+rcpt+"\r\n")
-		scanOk(t, c, scanner)
-		if !strings.HasPrefix(scanner.Text(), "501 5.5.2 ") {
-			t.Fatalf("Invalid RCPT response for %q: %v", rcpt, scanner.Text())
-		}
+		expect(t, c, scanner, "RCPT TO:"+rcpt, "501 5.5.2 ")
 	}
+	expect(t, c, scanner, "DATA", "354 ")
+	expect(t, c, scanner, "Hey\r\n.", "250 ")
 
-	_, _ = io.WriteString(c, "DATA\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "354 ") {
-		t.Fatal("Invalid DATA response:", scanner.Text())
-	}
-	_, _ = io.WriteString(c, "Hey\r\n.\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid DATA response:", scanner.Text())
-	}
-
-	if len(be.messages) != 1 {
-		t.Fatal("Invalid number of sent messages:", be.messages)
-	}
+	require.Len(t, be.messages, 1)
 	msg := be.messages[0]
-	if msg.From != "root@nsa.gov" {
-		t.Fatal("Invalid mail sender:", msg.From)
-	}
-	want := []string{`"x> NOTIFY=NEVER ORCPT=rfc822;y"@example.org`, `"user@internal"@example.org`}
-	if !slices.Equal(msg.To, want) {
-		t.Fatalf("Invalid mail recipients: %q, want %q", msg.To, want)
-	}
-	if msg.RcptOpts[0].Notify != nil || msg.RcptOpts[0].OriginalRecipient != "" {
-		t.Fatal("Quoted local-part was parsed as RCPT parameters:", msg.RcptOpts[0])
-	}
+	require.Equal(t, "root@nsa.gov", msg.From)
+	require.Equal(t, []string{`"x> NOTIFY=NEVER ORCPT=rfc822;y"@example.org`, `"user@internal"@example.org`}, msg.To)
+	// The quoted local-part must not be parsed as RCPT parameters.
+	require.Nil(t, msg.RcptOpts[0].Notify)
+	require.Empty(t, msg.RcptOpts[0].OriginalRecipient)
 }
 
 func TestServer(t *testing.T) {
@@ -839,48 +603,23 @@ func TestServer(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	_, _ = io.WriteString(c, "MAIL FROM:<root@nsa.gov>\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid MAIL response:", scanner.Text())
-	}
-
-	_, _ = io.WriteString(c, "RCPT TO:<root@gchq.gov.uk>\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid RCPT response:", scanner.Text())
-	}
-
-	_, _ = io.WriteString(c, "DATA\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "354 ") {
-		t.Fatal("Invalid DATA response:", scanner.Text())
-	}
+	expect(t, c, scanner, "MAIL FROM:<root@nsa.gov>", "250 ")
+	expect(t, c, scanner, "RCPT TO:<root@gchq.gov.uk>", "250 ")
+	expect(t, c, scanner, "DATA", "354 ")
 
 	_, _ = io.WriteString(c, "From: root@nsa.gov\r\n")
 	_, _ = io.WriteString(c, "\r\n")
 	_, _ = io.WriteString(c, "Hey\r <3\r\n")
 	_, _ = io.WriteString(c, "..this dot is fine\r\n")
 	_, _ = io.WriteString(c, ".\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid DATA response:", scanner.Text())
-	}
+	requirePrefix(t, readReply(t, c, scanner), "250 ")
 
-	if len(be.messages) != 1 || len(be.anonmsgs) != 0 {
-		t.Fatal("Invalid number of sent messages:", be.messages, be.anonmsgs)
-	}
-
+	require.Len(t, be.messages, 1)
+	require.Empty(t, be.anonmsgs)
 	msg := be.messages[0]
-	if msg.From != "root@nsa.gov" {
-		t.Fatal("Invalid mail sender:", msg.From)
-	}
-	if len(msg.To) != 1 || msg.To[0] != "root@gchq.gov.uk" {
-		t.Fatal("Invalid mail recipients:", msg.To)
-	}
-	if string(msg.Data) != "From: root@nsa.gov\r\n\r\nHey\r <3\r\n.this dot is fine\r\n" {
-		t.Fatal("Invalid mail data:", string(msg.Data))
-	}
+	require.Equal(t, "root@nsa.gov", msg.From)
+	require.Equal(t, []string{"root@gchq.gov.uk"}, msg.To)
+	require.Equal(t, "From: root@nsa.gov\r\n\r\nHey\r <3\r\n.this dot is fine\r\n", string(msg.Data))
 }
 
 func TestServerPipeline(t *testing.T) {
@@ -894,40 +633,16 @@ func TestServerPipeline(t *testing.T) {
 		"MAIL FROM:<root@nsa.gov>\r\nRCPT TO:<root@gchq.gov.uk>\r\n"+
 			"DATA\r\nFrom: root@nsa.gov\r\n\r\nHey\r <3\r\n..this dot is fine\r\n.\r\n",
 	)
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid MAIL response:", scanner.Text())
+	for _, prefix := range []string{"250 ", "250 ", "354 ", "250 "} { // MAIL, RCPT, DATA, end of data
+		requirePrefix(t, readReply(t, c, scanner), prefix)
 	}
 
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid RCPT response:", scanner.Text())
-	}
-
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "354 ") {
-		t.Fatal("Invalid DATA response:", scanner.Text())
-	}
-
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid DATA response:", scanner.Text())
-	}
-
-	if len(be.messages) != 1 || len(be.anonmsgs) != 0 {
-		t.Fatal("Invalid number of sent messages:", be.messages, be.anonmsgs)
-	}
-
+	require.Len(t, be.messages, 1)
+	require.Empty(t, be.anonmsgs)
 	msg := be.messages[0]
-	if msg.From != "root@nsa.gov" {
-		t.Fatal("Invalid mail sender:", msg.From)
-	}
-	if len(msg.To) != 1 || msg.To[0] != "root@gchq.gov.uk" {
-		t.Fatal("Invalid mail recipients:", msg.To)
-	}
-	if string(msg.Data) != "From: root@nsa.gov\r\n\r\nHey\r <3\r\n.this dot is fine\r\n" {
-		t.Fatal("Invalid mail data:", string(msg.Data))
-	}
+	require.Equal(t, "root@nsa.gov", msg.From)
+	require.Equal(t, []string{"root@gchq.gov.uk"}, msg.To)
+	require.Equal(t, "From: root@nsa.gov\r\n\r\nHey\r <3\r\n.this dot is fine\r\n", string(msg.Data))
 }
 
 func TestServer_LFDotLF(t *testing.T) {
@@ -937,23 +652,9 @@ func TestServer_LFDotLF(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	_, _ = io.WriteString(c, "MAIL FROM:<root@nsa.gov>\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid MAIL response:", scanner.Text())
-	}
-
-	_, _ = io.WriteString(c, "RCPT TO:<root@gchq.gov.uk>\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid RCPT response:", scanner.Text())
-	}
-
-	_, _ = io.WriteString(c, "DATA\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "354 ") {
-		t.Fatal("Invalid DATA response:", scanner.Text())
-	}
+	expect(t, c, scanner, "MAIL FROM:<root@nsa.gov>", "250 ")
+	expect(t, c, scanner, "RCPT TO:<root@gchq.gov.uk>", "250 ")
+	expect(t, c, scanner, "DATA", "354 ")
 
 	_, _ = io.WriteString(c, "From: root@nsa.gov\r\n")
 	_, _ = io.WriteString(c, "\r\n")
@@ -961,19 +662,12 @@ func TestServer_LFDotLF(t *testing.T) {
 	_, _ = io.WriteString(c, "\n.\n")
 	_, _ = io.WriteString(c, "this is going to break your server\r\n")
 	_, _ = io.WriteString(c, ".\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid DATA response:", scanner.Text())
-	}
+	requirePrefix(t, readReply(t, c, scanner), "250 ")
 
-	if len(be.messages) != 1 || len(be.anonmsgs) != 0 {
-		t.Fatal("Invalid number of sent messages:", be.messages, be.anonmsgs)
-	}
-
-	msg := be.messages[0]
-	if string(msg.Data) != "From: root@nsa.gov\r\n\r\nhey\r\n\n.\nthis is going to break your server\r\n" {
-		t.Fatal("Invalid mail data:", string(msg.Data))
-	}
+	require.Len(t, be.messages, 1)
+	require.Empty(t, be.anonmsgs)
+	require.Equal(t, "From: root@nsa.gov\r\n\r\nhey\r\n\n.\nthis is going to break your server\r\n",
+		string(be.messages[0].Data))
 }
 
 func TestServer_EmptyMessage(t *testing.T) {
@@ -983,38 +677,14 @@ func TestServer_EmptyMessage(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	_, _ = io.WriteString(c, "MAIL FROM:<root@nsa.gov>\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid MAIL response:", scanner.Text())
-	}
+	expect(t, c, scanner, "MAIL FROM:<root@nsa.gov>", "250 ")
+	expect(t, c, scanner, "RCPT TO:<root@gchq.gov.uk>", "250 ")
+	expect(t, c, scanner, "DATA", "354 ")
+	expect(t, c, scanner, "\r\n\r\n.", "250 ")
 
-	_, _ = io.WriteString(c, "RCPT TO:<root@gchq.gov.uk>\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid RCPT response:", scanner.Text())
-	}
-
-	_, _ = io.WriteString(c, "DATA\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "354 ") {
-		t.Fatal("Invalid DATA response:", scanner.Text())
-	}
-
-	_, _ = io.WriteString(c, "\r\n\r\n.\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid DATA response:", scanner.Text())
-	}
-
-	if len(be.messages) != 1 || len(be.anonmsgs) != 0 {
-		t.Fatal("Invalid number of sent messages:", be.messages, be.anonmsgs)
-	}
-
-	msg := be.messages[0]
-	if string(msg.Data) != "\r\n\r\n" {
-		t.Fatal("Invalid mail data:", string(msg.Data), msg.Data)
-	}
+	require.Len(t, be.messages, 1)
+	require.Empty(t, be.anonmsgs)
+	require.Equal(t, "\r\n\r\n", string(be.messages[0].Data))
 }
 
 func TestServer_authDisabled(t *testing.T) {
@@ -1027,15 +697,8 @@ func TestServer_authDisabled(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	if _, ok := caps["AUTH PLAIN"]; ok {
-		t.Fatal("AUTH PLAIN capability is present when auth is disabled")
-	}
-
-	_, _ = io.WriteString(c, "AUTH PLAIN\r\n")
-	scanOk(t, c, scanner)
-	if scanner.Text() != "502 5.7.0 Authentication not supported" {
-		t.Fatal("Invalid AUTH response with auth disabled:", scanner.Text())
-	}
+	require.False(t, caps["AUTH PLAIN"], "AUTH PLAIN capability is present when auth is disabled")
+	require.Equal(t, "502 5.7.0 Authentication not supported", send(t, c, scanner, "AUTH PLAIN"))
 }
 
 func TestServer_authWrongMechanism(t *testing.T) {
@@ -1047,92 +710,45 @@ func TestServer_authWrongMechanism(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	if _, ok := caps["AUTH PLAIN"]; !ok {
-		t.Fatal("AUTH PLAIN capability isn't present when auth is enabled")
-	}
-
-	_, _ = io.WriteString(c, "AUTH HI\r\n")
-	scanOk(t, c, scanner)
-	if scanner.Text() != "504 5.5.4 Unrecognized authentication type" {
-		t.Fatal("Invalid AUTH response with wrong auth mechanism:", scanner.Text())
-	}
+	require.True(t, caps["AUTH PLAIN"], "AUTH PLAIN capability isn't present when auth is enabled")
+	require.Equal(t, "504 5.5.4 Unrecognized authentication type", send(t, c, scanner, "AUTH HI"))
 }
 
 func TestServer_otherCommands(t *testing.T) {
 	_, s, c, scanner := testServerAuthenticated(t, nil)
 	defer func() { _ = s.Close() }()
 
-	_, _ = io.WriteString(c, "HELP\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "502 ") {
-		t.Fatal("Invalid HELP response:", scanner.Text())
-	}
-
-	_, _ = io.WriteString(c, "VRFY test\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "501 ") {
-		t.Fatal("Invalid VRFY response:", scanner.Text())
-	}
-
-	_, _ = io.WriteString(c, "VRFY test@a.de\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "252 ") {
-		t.Fatal("Invalid VRFY response:", scanner.Text())
-	}
-
-	_, _ = io.WriteString(c, "NOOP\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid NOOP response:", scanner.Text())
-	}
-
-	_, _ = io.WriteString(c, "RSET\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid RSET response:", scanner.Text())
-	}
-
-	_, _ = io.WriteString(c, "QUIT\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "221 ") {
-		t.Fatal("Invalid QUIT response:", scanner.Text())
-	}
+	expect(t, c, scanner, "HELP", "502 ")
+	expect(t, c, scanner, "VRFY test", "501 ")
+	expect(t, c, scanner, "VRFY test@a.de", "252 ")
+	expect(t, c, scanner, "NOOP", "250 ")
+	expect(t, c, scanner, "RSET", "250 ")
+	expect(t, c, scanner, "QUIT", "221 ")
 }
 
 func TestServer_invalidCommand(t *testing.T) {
 	_, s, c, scanner := testServerAuthenticated(t, nil)
 	defer func() { _ = s.Close() }()
 
-	_, _ = io.WriteString(c, "XXXX\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "502 ") {
-		t.Fatal("Invalid invalid command response:", scanner.Text())
-	}
+	expect(t, c, scanner, "XXXX", "502 ")
 }
 
 func TestServer_tooLongMessage(t *testing.T) {
 	be, s, c, scanner := testServerAuthenticated(t, nil, server.WithMaxMessageBytes(50))
 	defer func() { _ = s.Close() }()
 
-	_, _ = io.WriteString(c, "MAIL FROM:<root@nsa.gov>\r\n")
-	scanOk(t, c, scanner)
-	_, _ = io.WriteString(c, "RCPT TO:<root@gchq.gov.uk>\r\n")
-	scanOk(t, c, scanner)
-	_, _ = io.WriteString(c, "DATA\r\n")
-	scanOk(t, c, scanner)
+	send(t, c, scanner, "MAIL FROM:<root@nsa.gov>")
+	send(t, c, scanner, "RCPT TO:<root@gchq.gov.uk>")
+	send(t, c, scanner, "DATA")
 
 	_, _ = io.WriteString(c, "This is a very long message.\r\n")
 	_, _ = io.WriteString(c, "Much longer than you can possibly imagine.\r\n")
 	_, _ = io.WriteString(c, "And much longer than the server's MaxMessageBytes.\r\n")
 	_, _ = io.WriteString(c, ".\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "552 ") {
-		t.Fatal("Invalid DATA response, expected an error but got:", scanner.Text())
-	}
+	requirePrefix(t, readReply(t, c, scanner), "552 ")
 
-	if len(be.messages) != 0 || len(be.anonmsgs) != 0 {
-		t.Fatal("Invalid number of sent messages:", be.messages, be.anonmsgs)
-	}
+	require.Empty(t, be.messages)
+	require.Empty(t, be.anonmsgs)
 }
 
 // See https://www.postfix.org/smtp-smuggling.html
@@ -1169,29 +785,17 @@ func TestServer_smtpSmuggling(t *testing.T) {
 			be, s, c, scanner := testServerAuthenticated(t, nil)
 			defer func() { _ = s.Close() }()
 
-			_, _ = io.WriteString(c, "MAIL FROM:<root@nsa.gov>\r\n")
-			scanOk(t, c, scanner)
-			_, _ = io.WriteString(c, "RCPT TO:<root@gchq.gov.uk>\r\n")
-			scanOk(t, c, scanner)
-			_, _ = io.WriteString(c, "DATA\r\n")
-			scanOk(t, c, scanner)
+			send(t, c, scanner, "MAIL FROM:<root@nsa.gov>")
+			send(t, c, scanner, "RCPT TO:<root@gchq.gov.uk>")
+			send(t, c, scanner, "DATA")
 
 			for _, line := range tc.lines {
 				_, _ = io.WriteString(c, line)
 			}
-			scanOk(t, c, scanner)
-			if !strings.HasPrefix(scanner.Text(), "250 ") {
-				t.Fatal("Invalid DATA response, expected an error but got:", scanner.Text())
-			}
+			requirePrefix(t, readReply(t, c, scanner), "250 ")
 
-			if len(be.messages) != 1 {
-				t.Fatal("Invalid number of sent messages:", len(be.messages))
-			}
-
-			msg := be.messages[0]
-			if string(msg.Data) != tc.expected {
-				t.Fatalf("Invalid mail data: %q expected %q", string(msg.Data), tc.expected)
-			}
+			require.Len(t, be.messages, 1)
+			require.Equal(t, tc.expected, string(be.messages[0].Data))
 		})
 	}
 }
@@ -1200,11 +804,7 @@ func TestServer_tooLongLine(t *testing.T) {
 	_, s, c, scanner := testServerAuthenticated(t, nil)
 	defer func() { _ = s.Close() }()
 
-	_, _ = io.WriteString(c, "MAIL FROM:<root@nsa.gov> "+strings.Repeat("A", 2*12288)+"\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "500 ") {
-		t.Fatal("Invalid response, expected an error but got:", scanner.Text())
-	}
+	expect(t, c, scanner, "MAIL FROM:<root@nsa.gov> "+strings.Repeat("A", 2*12288), "500 ")
 }
 
 func TestServer_anonymousUserError(t *testing.T) {
@@ -1216,11 +816,7 @@ func TestServer_anonymousUserError(t *testing.T) {
 
 	be.userErr = deltasmtp.ErrAuthRequired
 
-	_, _ = io.WriteString(c, "MAIL FROM:<root@nsa.gov>\r\n")
-	scanOk(t, c, scanner)
-	if scanner.Text() != "530 5.7.0 Authentication required" {
-		t.Fatal("Backend refused anonymous mail but client was permitted:", scanner.Text())
-	}
+	require.Equal(t, "530 5.7.0 Authentication required", send(t, c, scanner, "MAIL FROM:<root@nsa.gov>"))
 }
 
 func TestServer_anonymousUserOK(t *testing.T) {
@@ -1230,23 +826,13 @@ func TestServer_anonymousUserOK(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	_, _ = io.WriteString(c, "MAIL FROM: root@nsa.gov\r\n")
-	scanOk(t, c, scanner)
-	_, _ = io.WriteString(c, "RCPT TO:<root@gchq.gov.uk>\r\n")
-	scanOk(t, c, scanner)
-	_, _ = io.WriteString(c, "DATA\r\n")
-	scanOk(t, c, scanner)
-	_, _ = io.WriteString(c, "Hey <3\r\n")
-	_, _ = io.WriteString(c, ".\r\n")
-	scanOk(t, c, scanner)
+	send(t, c, scanner, "MAIL FROM: root@nsa.gov")
+	send(t, c, scanner, "RCPT TO:<root@gchq.gov.uk>")
+	send(t, c, scanner, "DATA")
+	expect(t, c, scanner, "Hey <3\r\n.", "250 ")
 
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid DATA response:", scanner.Text())
-	}
-
-	if len(be.messages) != 0 || len(be.anonmsgs) != 1 {
-		t.Fatal("Invalid number of sent messages:", be.messages, be.anonmsgs)
-	}
+	require.Empty(t, be.messages)
+	require.Len(t, be.anonmsgs, 1)
 }
 
 func TestServer_recipientNecessary(t *testing.T) {
@@ -1256,32 +842,15 @@ func TestServer_recipientNecessary(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	_, _ = io.WriteString(c, "MAIL FROM: root@nsa.gov\r\n")
-	scanOk(t, c, scanner)
+	send(t, c, scanner, "MAIL FROM: root@nsa.gov")
+	expect(t, c, scanner, "DATA", "502 ") // 502 5.5.1 Missing RCPT TO command.
 
-	_, _ = io.WriteString(c, "DATA\r\n")
-	scanOk(t, c, scanner)
+	send(t, c, scanner, "RCPT TO:<root@gchq.gov.uk>")
+	send(t, c, scanner, "DATA")
+	expect(t, c, scanner, "Hey <3\r\n.", "250 ")
 
-	// 502 5.5.1 Missing RCPT TO command.
-	if !strings.HasPrefix(scanner.Text(), "502 ") {
-		t.Fatal("Invalid DATA response:", scanner.Text())
-	}
-
-	_, _ = io.WriteString(c, "RCPT TO:<root@gchq.gov.uk>\r\n")
-	scanOk(t, c, scanner)
-	_, _ = io.WriteString(c, "DATA\r\n")
-	scanOk(t, c, scanner)
-	_, _ = io.WriteString(c, "Hey <3\r\n")
-	_, _ = io.WriteString(c, ".\r\n")
-	scanOk(t, c, scanner)
-
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid DATA response:", scanner.Text())
-	}
-
-	if len(be.messages) != 0 || len(be.anonmsgs) != 1 {
-		t.Fatal("Invalid number of sent messages:", be.messages, be.anonmsgs)
-	}
+	require.Empty(t, be.messages)
+	require.Len(t, be.anonmsgs, 1)
 }
 
 func TestServer_authParam_invalidHexchar(t *testing.T) {
@@ -1292,18 +861,8 @@ func TestServer_authParam_invalidHexchar(t *testing.T) {
 	}()
 
 	// Invalid HEXCHAR
-	_, _ = io.WriteString(c, "MAIL FROM: root@nsa.gov AUTH=<hey+A>\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "500 5.5.4 Malformed AUTH parameter value") {
-		t.Fatal("Invalid MAIL response:", scanner.Text())
-	}
-
-	// Invalid HEXCHAR
-	_, _ = io.WriteString(c, "MAIL FROM: root@nsa.gov AUTH=<hey+A>\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "500 5.5.4 Malformed AUTH parameter value") {
-		t.Fatal("Invalid MAIL response:", scanner.Text())
-	}
+	expect(t, c, scanner, "MAIL FROM: root@nsa.gov AUTH=<hey+A>", "500 5.5.4 Malformed AUTH parameter value")
+	expect(t, c, scanner, "MAIL FROM: root@nsa.gov AUTH=<hey+A>", "500 5.5.4 Malformed AUTH parameter value")
 }
 
 func TestServer_authParam(t *testing.T) {
@@ -1318,29 +877,17 @@ func TestServer_authParam(t *testing.T) {
 	// >extension MUST support the AUTH parameter to the MAIL FROM
 	// >command even when the client has not authenticated itself to the
 	// >server.
-	_, _ = io.WriteString(c, "MAIL FROM: root@nsa.gov AUTH=hey+3Da@example.com\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid MAIL response:", scanner.Text())
-	}
+	expect(t, c, scanner, "MAIL FROM: root@nsa.gov AUTH=hey+3Da@example.com", "250 ")
 	// Go on as usual.
-	_, _ = io.WriteString(c, "RCPT TO:<root@gchq.gov.uk>\r\n")
-	scanOk(t, c, scanner)
-	_, _ = io.WriteString(c, "DATA\r\n")
-	scanOk(t, c, scanner)
-	_, _ = io.WriteString(c, "Hey <3\r\n")
-	_, _ = io.WriteString(c, ".\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid DATA response:", scanner.Text())
-	}
+	send(t, c, scanner, "RCPT TO:<root@gchq.gov.uk>")
+	send(t, c, scanner, "DATA")
+	expect(t, c, scanner, "Hey <3\r\n.", "250 ")
 
-	if len(be.messages) != 0 || len(be.anonmsgs) != 1 {
-		t.Fatal("Invalid number of sent messages:", be.messages, be.anonmsgs)
-	}
-	if val := be.anonmsgs[0].Opts.Auth; val == nil || *val != "hey=a@example.com" {
-		t.Fatal("Invalid Auth value:", val)
-	}
+	require.Empty(t, be.messages)
+	require.Len(t, be.anonmsgs, 1)
+	val := be.anonmsgs[0].Opts.Auth
+	require.NotNil(t, val)
+	require.Equal(t, "hey=a@example.com", *val)
 }
 
 func TestServer_Chunking(t *testing.T) {
@@ -1350,46 +897,23 @@ func TestServer_Chunking(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	_, _ = io.WriteString(c, "MAIL FROM:<root@nsa.gov>\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid MAIL response:", scanner.Text())
-	}
-
-	_, _ = io.WriteString(c, "RCPT TO:<root@gchq.gov.uk>\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid RCPT response:", scanner.Text())
-	}
+	expect(t, c, scanner, "MAIL FROM:<root@nsa.gov>", "250 ")
+	expect(t, c, scanner, "RCPT TO:<root@gchq.gov.uk>", "250 ")
 
 	_, _ = io.WriteString(c, "BDAT 8\r\n")
 	_, _ = io.WriteString(c, "Hey <3\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid BDAT response:", scanner.Text())
-	}
+	requirePrefix(t, readReply(t, c, scanner), "250 ")
 
 	_, _ = io.WriteString(c, "BDAT 8 LAST\r\n")
 	_, _ = io.WriteString(c, "Hey :3\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid BDAT response:", scanner.Text())
-	}
+	requirePrefix(t, readReply(t, c, scanner), "250 ")
 
-	if len(be.messages) != 1 || len(be.anonmsgs) != 0 {
-		t.Fatal("Invalid number of sent messages:", be.messages, be.anonmsgs)
-	}
-
+	require.Len(t, be.messages, 1)
+	require.Empty(t, be.anonmsgs)
 	msg := be.messages[0]
-	if msg.From != "root@nsa.gov" {
-		t.Fatal("Invalid mail sender:", msg.From)
-	}
-	if len(msg.To) != 1 || msg.To[0] != "root@gchq.gov.uk" {
-		t.Fatal("Invalid mail recipients:", msg.To)
-	}
-	if want := "Hey <3\r\nHey :3\r\n"; string(msg.Data) != want {
-		t.Fatal("Invalid mail data:", string(msg.Data), msg.Data)
-	}
+	require.Equal(t, "root@nsa.gov", msg.From)
+	require.Equal(t, []string{"root@gchq.gov.uk"}, msg.To)
+	require.Equal(t, "Hey <3\r\nHey :3\r\n", string(msg.Data))
 }
 
 func TestServer_Chunking_Large(t *testing.T) {
@@ -1401,46 +925,23 @@ func TestServer_Chunking_Large(t *testing.T) {
 
 	largeMessage := strings.Repeat("a", 5000)
 
-	_, _ = io.WriteString(c, "MAIL FROM:<root@nsa.gov>\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid MAIL response:", scanner.Text())
-	}
-
-	_, _ = io.WriteString(c, "RCPT TO:<root@gchq.gov.uk>\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid RCPT response:", scanner.Text())
-	}
+	expect(t, c, scanner, "MAIL FROM:<root@nsa.gov>", "250 ")
+	expect(t, c, scanner, "RCPT TO:<root@gchq.gov.uk>", "250 ")
 
 	_, _ = io.WriteString(c, "BDAT "+strconv.Itoa(len(largeMessage)+2)+"\r\n")
 	_, _ = io.WriteString(c, largeMessage+"\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid BDAT response:", scanner.Text())
-	}
+	requirePrefix(t, readReply(t, c, scanner), "250 ")
 
 	_, _ = io.WriteString(c, "BDAT 8 LAST\r\n")
 	_, _ = io.WriteString(c, "Hey :3\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid BDAT response:", scanner.Text())
-	}
+	requirePrefix(t, readReply(t, c, scanner), "250 ")
 
-	if len(be.messages) != 1 || len(be.anonmsgs) != 0 {
-		t.Fatal("Invalid number of sent messages:", be.messages, be.anonmsgs)
-	}
-
+	require.Len(t, be.messages, 1)
+	require.Empty(t, be.anonmsgs)
 	msg := be.messages[0]
-	if msg.From != "root@nsa.gov" {
-		t.Fatal("Invalid mail sender:", msg.From)
-	}
-	if len(msg.To) != 1 || msg.To[0] != "root@gchq.gov.uk" {
-		t.Fatal("Invalid mail recipients:", msg.To)
-	}
-	if want := largeMessage + "\r\nHey :3\r\n"; string(msg.Data) != want {
-		t.Fatal("Invalid mail data:", string(msg.Data), msg.Data)
-	}
+	require.Equal(t, "root@nsa.gov", msg.From)
+	require.Equal(t, []string{"root@gchq.gov.uk"}, msg.To)
+	require.Equal(t, largeMessage+"\r\nHey :3\r\n", string(msg.Data))
 }
 
 func TestServer_Chunking_Reset(t *testing.T) {
@@ -1451,53 +952,24 @@ func TestServer_Chunking_Reset(t *testing.T) {
 	}()
 	be.dataErrors = make(chan error, 10)
 
-	_, _ = io.WriteString(c, "MAIL FROM:<root@nsa.gov>\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid MAIL response:", scanner.Text())
-	}
-
-	_, _ = io.WriteString(c, "RCPT TO:<root@gchq.gov.uk>\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid RCPT response:", scanner.Text())
-	}
+	expect(t, c, scanner, "MAIL FROM:<root@nsa.gov>", "250 ")
+	expect(t, c, scanner, "RCPT TO:<root@gchq.gov.uk>", "250 ")
 
 	_, _ = io.WriteString(c, "BDAT 8\r\n")
 	_, _ = io.WriteString(c, "Hey <3\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid BDAT response:", scanner.Text())
-	}
+	requirePrefix(t, readReply(t, c, scanner), "250 ")
 
 	// Client changed its mind... Note, in this case Data method error is discarded and not returned to the cilent.
-	_, _ = io.WriteString(c, "RSET\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid BDAT response:", scanner.Text())
-	}
+	expect(t, c, scanner, "RSET", "250 ")
+	require.ErrorIs(t, <-be.dataErrors, deltasmtp.Reset)
 
-	if err := <-be.dataErrors; err != deltasmtp.Reset {
-		t.Fatal("Backend received a different error:", err)
-	}
+	send(t, c, scanner, "MAIL FROM: root@nsa.gov")
+	send(t, c, scanner, "RCPT TO:<root@gchq.gov.uk>")
+	send(t, c, scanner, "DATA")
+	expect(t, c, scanner, "Hey <3\r\n.", "250 ")
 
-	_, _ = io.WriteString(c, "MAIL FROM: root@nsa.gov\r\n")
-	scanOk(t, c, scanner)
-	_, _ = io.WriteString(c, "RCPT TO:<root@gchq.gov.uk>\r\n")
-	scanOk(t, c, scanner)
-	_, _ = io.WriteString(c, "DATA\r\n")
-	scanOk(t, c, scanner)
-	_, _ = io.WriteString(c, "Hey <3\r\n")
-	_, _ = io.WriteString(c, ".\r\n")
-	scanOk(t, c, scanner)
-
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid DATA response:", scanner.Text())
-	}
-
-	if len(be.messages) != 1 || len(be.anonmsgs) != 0 {
-		t.Fatal("Invalid number of sent messages:", be.messages, be.anonmsgs)
-	}
+	require.Len(t, be.messages, 1)
+	require.Empty(t, be.anonmsgs)
 }
 
 func TestServer_Chunking_Close(t *testing.T) {
@@ -1508,35 +980,16 @@ func TestServer_Chunking_Close(t *testing.T) {
 	}()
 	be.dataErrors = make(chan error, 10)
 
-	_, _ = io.WriteString(c, "MAIL FROM:<root@nsa.gov>\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid MAIL response:", scanner.Text())
-	}
-
-	_, _ = io.WriteString(c, "RCPT TO:<root@gchq.gov.uk>\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid RCPT response:", scanner.Text())
-	}
+	expect(t, c, scanner, "MAIL FROM:<root@nsa.gov>", "250 ")
+	expect(t, c, scanner, "RCPT TO:<root@gchq.gov.uk>", "250 ")
 
 	_, _ = io.WriteString(c, "BDAT 8\r\n")
 	_, _ = io.WriteString(c, "Hey <3\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid BDAT response:", scanner.Text())
-	}
+	requirePrefix(t, readReply(t, c, scanner), "250 ")
 
 	// Client changed its mind... Note, in this case Data method error is discarded and not returned to the cilent.
-	_, _ = io.WriteString(c, "QUIT\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "221 ") {
-		t.Fatal("Invalid BDAT response:", scanner.Text())
-	}
-
-	if err := <-be.dataErrors; err != deltasmtp.Quit {
-		t.Fatal("Backend received a different error:", err)
-	}
+	expect(t, c, scanner, "QUIT", "221 ")
+	require.ErrorIs(t, <-be.dataErrors, deltasmtp.Quit)
 }
 
 func TestServer_Chunking_ClosedInTheMiddle(t *testing.T) {
@@ -1547,17 +1000,8 @@ func TestServer_Chunking_ClosedInTheMiddle(t *testing.T) {
 	}()
 	be.dataErrors = make(chan error, 10)
 
-	_, _ = io.WriteString(c, "MAIL FROM:<root@nsa.gov>\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid MAIL response:", scanner.Text())
-	}
-
-	_, _ = io.WriteString(c, "RCPT TO:<root@gchq.gov.uk>\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid RCPT response:", scanner.Text())
-	}
+	expect(t, c, scanner, "MAIL FROM:<root@nsa.gov>", "250 ")
+	expect(t, c, scanner, "RCPT TO:<root@gchq.gov.uk>", "250 ")
 
 	_, _ = io.WriteString(c, "BDAT 8\r\n")
 	_, _ = io.WriteString(c, "Hey <")
@@ -1565,9 +1009,7 @@ func TestServer_Chunking_ClosedInTheMiddle(t *testing.T) {
 	// Bye!
 	_ = c.Close()
 
-	if err := <-be.dataErrors; err != deltasmtp.ErrConnection {
-		t.Fatal("Backend received a different error:", err)
-	}
+	require.ErrorIs(t, <-be.dataErrors, deltasmtp.ErrConnection)
 }
 
 func TestServer_Chunking_EarlyError(t *testing.T) {
@@ -1579,24 +1021,12 @@ func TestServer_Chunking_EarlyError(t *testing.T) {
 
 	be.dataErr = deltasmtp.NewStatusS(555, deltasmtp.EnhancedCode{5, 0, 0}, "I failed")
 
-	_, _ = io.WriteString(c, "MAIL FROM:<root@nsa.gov>\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid MAIL response:", scanner.Text())
-	}
-
-	_, _ = io.WriteString(c, "RCPT TO:<root@gchq.gov.uk>\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid RCPT response:", scanner.Text())
-	}
+	expect(t, c, scanner, "MAIL FROM:<root@nsa.gov>", "250 ")
+	expect(t, c, scanner, "RCPT TO:<root@gchq.gov.uk>", "250 ")
 
 	_, _ = io.WriteString(c, "BDAT 8\r\n")
 	_, _ = io.WriteString(c, "Hey <3\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "555 5.0.0 I failed") {
-		t.Fatal("Invalid BDAT response:", scanner.Text())
-	}
+	requirePrefix(t, readReply(t, c, scanner), "555 5.0.0 I failed")
 }
 
 func TestServer_Chunking_EarlyErrorDuringChunk(t *testing.T) {
@@ -1608,17 +1038,8 @@ func TestServer_Chunking_EarlyErrorDuringChunk(t *testing.T) {
 
 	be.dataErr = deltasmtp.NewStatusS(555, deltasmtp.EnhancedCode{5, 0, 0}, "I failed")
 
-	_, _ = io.WriteString(c, "MAIL FROM:<root@nsa.gov>\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid MAIL response:", scanner.Text())
-	}
-
-	_, _ = io.WriteString(c, "RCPT TO:<root@gchq.gov.uk>\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid RCPT response:", scanner.Text())
-	}
+	expect(t, c, scanner, "MAIL FROM:<root@nsa.gov>", "250 ")
+	expect(t, c, scanner, "RCPT TO:<root@gchq.gov.uk>", "250 ")
 
 	_, _ = io.WriteString(c, "BDAT 8\r\n")
 	_, _ = io.WriteString(c, "Hey <3\r\n")
@@ -1626,17 +1047,11 @@ func TestServer_Chunking_EarlyErrorDuringChunk(t *testing.T) {
 	// Noop is send before failure has read, to check if pipelining is working.
 	_, _ = io.WriteString(c, "NOOP\r\n")
 
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "555 5.0.0 I failed") {
-		t.Fatal("Invalid BDAT response:", scanner.Text())
-	}
+	requirePrefix(t, readReply(t, c, scanner), "555 5.0.0 I failed")
 
 	// See that command stream state is not corrupted e.g. server is still not
 	// waiting for remaining chunk octets.
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid RCPT response:", scanner.Text())
-	}
+	requirePrefix(t, readReply(t, c, scanner), "250 ")
 }
 
 func TestServer_Chunking_tooLongMessage(t *testing.T) {
@@ -1646,10 +1061,8 @@ func TestServer_Chunking_tooLongMessage(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	_, _ = io.WriteString(c, "MAIL FROM:<root@nsa.gov>\r\n")
-	scanOk(t, c, scanner)
-	_, _ = io.WriteString(c, "RCPT TO:<root@gchq.gov.uk>\r\n")
-	scanOk(t, c, scanner)
+	send(t, c, scanner, "MAIL FROM:<root@nsa.gov>")
+	send(t, c, scanner, "RCPT TO:<root@gchq.gov.uk>")
 	_, _ = io.WriteString(c, "BDAT 30\r\n")
 	_, _ = io.WriteString(c, "This is a very long message.\r\n")
 	scanOk(t, c, scanner)
@@ -1657,14 +1070,10 @@ func TestServer_Chunking_tooLongMessage(t *testing.T) {
 	_, _ = io.WriteString(c, "BDAT 96 LAST\r\n")
 	_, _ = io.WriteString(c, "Much longer than you can possibly imagine.\r\n")
 	_, _ = io.WriteString(c, "And much longer than the server's MaxMessageBytes.\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "552 ") {
-		t.Fatal("Invalid DATA response, expected an error but got:", scanner.Text())
-	}
+	requirePrefix(t, readReply(t, c, scanner), "552 ")
 
-	if len(be.messages) != 0 || len(be.anonmsgs) != 0 {
-		t.Fatal("Invalid number of sent messages:", be.messages, be.anonmsgs)
-	}
+	require.Empty(t, be.messages)
+	require.Empty(t, be.anonmsgs)
 }
 
 func TestServer_Chunking_Binarymime(t *testing.T) {
@@ -1677,46 +1086,23 @@ func TestServer_Chunking_Binarymime(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	_, _ = io.WriteString(c, "MAIL FROM:<root@nsa.gov> BODY=BINARYMIME\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid MAIL response:", scanner.Text())
-	}
-
-	_, _ = io.WriteString(c, "RCPT TO:<root@gchq.gov.uk>\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid RCPT response:", scanner.Text())
-	}
+	expect(t, c, scanner, "MAIL FROM:<root@nsa.gov> BODY=BINARYMIME", "250 ")
+	expect(t, c, scanner, "RCPT TO:<root@gchq.gov.uk>", "250 ")
 
 	_, _ = io.WriteString(c, "BDAT 8\r\n")
 	_, _ = io.WriteString(c, "Hey <3\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid BDAT response:", scanner.Text())
-	}
+	requirePrefix(t, readReply(t, c, scanner), "250 ")
 
 	_, _ = io.WriteString(c, "BDAT 8 LAST\r\n")
 	_, _ = io.WriteString(c, "Hey :3\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid BDAT response:", scanner.Text())
-	}
+	requirePrefix(t, readReply(t, c, scanner), "250 ")
 
-	if len(be.messages) != 1 || len(be.anonmsgs) != 0 {
-		t.Fatal("Invalid number of sent messages:", be.messages, be.anonmsgs)
-	}
-
+	require.Len(t, be.messages, 1)
+	require.Empty(t, be.anonmsgs)
 	msg := be.messages[0]
-	if msg.From != "root@nsa.gov" {
-		t.Fatal("Invalid mail sender:", msg.From)
-	}
-	if len(msg.To) != 1 || msg.To[0] != "root@gchq.gov.uk" {
-		t.Fatal("Invalid mail recipients:", msg.To)
-	}
-	if want := "Hey <3\r\nHey :3\r\n"; string(msg.Data) != want {
-		t.Fatal("Invalid mail data:", string(msg.Data), msg.Data)
-	}
+	require.Equal(t, "root@nsa.gov", msg.From)
+	require.Equal(t, []string{"root@gchq.gov.uk"}, msg.To)
+	require.Equal(t, "Hey <3\r\nHey :3\r\n", string(msg.Data))
 }
 
 func TestServerRRVS(t *testing.T) {
@@ -1727,60 +1113,25 @@ func TestServerRRVS(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	if _, ok := caps["RRVS"]; !ok {
-		t.Fatal("Missing capability: RRVS")
-	}
+	require.True(t, caps["RRVS"], "missing capability RRVS")
 
-	_, _ = io.WriteString(c, "MAIL FROM:<root@nsa.gov>\r\n")
-	scanOk(t, c, scanner)
-
-	_, _ = io.WriteString(c, "RCPT TO:<root@gchq.gov.uk> RRVS=\r\n")
-	scanOk(t, c, scanner)
-
-	if !strings.HasPrefix(scanner.Text(), "501 5.5.4") {
-		t.Fatal("Unexpected res on malformed RRVS parameter value:", scanner.Text())
-	}
-
-	_, _ = io.WriteString(c, "RCPT TO:<root@gchq.gov.uk> RRVS=1234\r\n")
-	scanOk(t, c, scanner)
-
-	if !strings.HasPrefix(scanner.Text(), "501 5.5.4 ") {
-		t.Fatal("Unexpected res on malformed RRVS parameter value:", scanner.Text())
-	}
-
-	_, _ = io.WriteString(c, "RCPT TO:<root@gchq.gov.uk> RRVS=2014-04-03T23:01:00Z\r\n")
-	scanOk(t, c, scanner)
-
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid RRVS parameter value:", scanner.Text())
-	}
-
-	_, _ = io.WriteString(c, "RCPT TO:<root@bnd.bund.de> RRVS=2020-03-19T11:13:00Z;ign0r3.th1s;othr_stuff\r\n")
-	scanOk(t, c, scanner)
-
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid RRVS parameter value:", scanner.Text())
-	}
+	send(t, c, scanner, "MAIL FROM:<root@nsa.gov>")
+	expect(t, c, scanner, "RCPT TO:<root@gchq.gov.uk> RRVS=", "501 5.5.4")
+	expect(t, c, scanner, "RCPT TO:<root@gchq.gov.uk> RRVS=1234", "501 5.5.4 ")
+	expect(t, c, scanner, "RCPT TO:<root@gchq.gov.uk> RRVS=2014-04-03T23:01:00Z", "250 ")
+	expect(t, c, scanner, "RCPT TO:<root@bnd.bund.de> RRVS=2020-03-19T11:13:00Z;ign0r3.th1s;othr_stuff", "250 ")
 
 	// complete the transaction
-	_, _ = io.WriteString(c, "DATA\r\n")
-	scanOk(t, c, scanner)
-	_, _ = io.WriteString(c, "Hey <3\r\n")
-	_, _ = io.WriteString(c, ".\r\n")
-	scanOk(t, c, scanner)
+	send(t, c, scanner, "DATA")
+	send(t, c, scanner, "Hey <3\r\n.")
 
 	opts := be.anonmsgs[0].RcptOpts
-	if opts == nil || len(opts) != 2 {
-		t.Fatal("Invalid number of recipients:", opts)
-	}
-
-	if !opts[0].RequireRecipientValidSince.Equal(time.Date(2014, time.April, 3, 23, 1, 0, 0, time.UTC)) {
-		t.Fatal("Invalid RRVS parameter value:", fmt.Sprintf("%#v", opts[0].RequireRecipientValidSince))
-	}
-
-	if !opts[1].RequireRecipientValidSince.Equal(time.Date(2020, time.March, 19, 11, 13, 0, 0, time.UTC)) {
-		t.Fatal("Invalid RRVS parameter value:", fmt.Sprintf("%#v", opts[1].RequireRecipientValidSince))
-	}
+	require.Len(t, opts, 2)
+	// WithinDuration with 0 compares the instants like time.Time.Equal.
+	require.WithinDuration(t, time.Date(2014, time.April, 3, 23, 1, 0, 0, time.UTC),
+		opts[0].RequireRecipientValidSince, 0)
+	require.WithinDuration(t, time.Date(2020, time.March, 19, 11, 13, 0, 0, time.UTC),
+		opts[1].RequireRecipientValidSince, 0)
 }
 
 func TestServerDELIVERBY(t *testing.T) {
@@ -1793,9 +1144,7 @@ func TestServerDELIVERBY(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	if !caps["DELIVERBY 50"] {
-		t.Fatal("Missing capability: DELIVERBY 50")
-	}
+	require.True(t, caps["DELIVERBY 50"], "missing capability DELIVERBY 50")
 
 	// RFC 2852 section 4 puts BY on MAIL FROM, so a bad value must be
 	// rejected before a transaction is opened.
@@ -1808,76 +1157,40 @@ func TestServerDELIVERBY(t *testing.T) {
 		"BY=-1;R",    // so is a negative one
 	}
 	for _, param := range malformed {
-		_, _ = io.WriteString(c, "MAIL FROM:<root@nsa.gov> "+param+"\r\n")
-		if res := readReply(t, c, scanner); !strings.HasPrefix(res, "501 5.5.4") {
-			t.Errorf("MAIL FROM with %q: want 501 5.5.4, got %q", param, res)
-		}
+		res := send(t, c, scanner, "MAIL FROM:<root@nsa.gov> "+param)
+		assert.True(t, strings.HasPrefix(res, "501 5.5.4"), "MAIL FROM with %q: want 501 5.5.4, got %q", param, res)
 	}
 
 	// A syntactically valid by-time below the server minimum is a different
 	// failure: RFC 2852 section 3 requires a 55z reply, section 4 names 555
 	// for a permanent server-specific refusal.
-	_, _ = io.WriteString(c, "MAIL FROM:<root@nsa.gov> BY=100;RT\r\n")
-	if res := readReply(t, c, scanner); !strings.HasPrefix(res, "250 ") {
-		t.Errorf("MAIL FROM with BY=100;RT: want 250, got %q", res)
-	}
-	_, _ = io.WriteString(c, "RSET\r\n")
-	if res := readReply(t, c, scanner); !strings.HasPrefix(res, "250 ") {
-		t.Fatal("RSET rejected:", res)
-	}
+	res := send(t, c, scanner, "MAIL FROM:<root@nsa.gov> BY=100;RT")
+	assert.True(t, strings.HasPrefix(res, "250 "), "MAIL FROM with BY=100;RT: want 250, got %q", res)
+	expect(t, c, scanner, "RSET", "250 ")
 
 	// Values the RFC requires the server to accept: exactly at the minimum
 	// with mode R, and zero or negative with mode N (section 4).
-	accepted := []string{"BY=50;R", "BY=0;N", "BY=-1;N"}
-	for _, param := range accepted {
-		_, _ = io.WriteString(c, "MAIL FROM:<root@nsa.gov> "+param+"\r\n")
-		if res := readReply(t, c, scanner); !strings.HasPrefix(res, "250 ") {
-			t.Errorf("MAIL FROM with %q: want 250, got %q", param, res)
-		}
-		_, _ = io.WriteString(c, "RSET\r\n")
-		if res := readReply(t, c, scanner); !strings.HasPrefix(res, "250 ") {
-			t.Fatal("RSET rejected:", res)
-		}
+	for _, param := range []string{"BY=50;R", "BY=0;N", "BY=-1;N"} {
+		res := send(t, c, scanner, "MAIL FROM:<root@nsa.gov> "+param)
+		assert.True(t, strings.HasPrefix(res, "250 "), "MAIL FROM with %q: want 250, got %q", param, res)
+		expect(t, c, scanner, "RSET", "250 ")
 	}
 
 	// The parsed value reaches the backend on the completed transaction.
-	_, _ = io.WriteString(c, "MAIL FROM:<root@nsa.gov> BY=100;NT\r\n")
-	if res := readReply(t, c, scanner); !strings.HasPrefix(res, "250 ") {
-		t.Fatal("MAIL FROM rejected:", res)
-	}
-	_, _ = io.WriteString(c, "RCPT TO:<root@gchq.gov.uk>\r\n")
-	if res := readReply(t, c, scanner); !strings.HasPrefix(res, "250 ") {
-		t.Fatal("RCPT TO rejected:", res)
-	}
-	_, _ = io.WriteString(c, "DATA\r\n")
-	if res := readReply(t, c, scanner); !strings.HasPrefix(res, "354 ") {
-		t.Fatal("DATA rejected:", res)
-	}
-	_, _ = io.WriteString(c, "Hey <3\r\n")
-	_, _ = io.WriteString(c, ".\r\n")
-	if res := readReply(t, c, scanner); !strings.HasPrefix(res, "250 ") {
-		t.Fatal("Message rejected:", res)
-	}
+	expect(t, c, scanner, "MAIL FROM:<root@nsa.gov> BY=100;NT", "250 ")
+	expect(t, c, scanner, "RCPT TO:<root@gchq.gov.uk>", "250 ")
+	expect(t, c, scanner, "DATA", "354 ")
+	expect(t, c, scanner, "Hey <3\r\n.", "250 ")
 
-	if len(be.anonmsgs) != 1 {
-		t.Fatalf("Invalid number of sent messages: want 1, got %d", len(be.anonmsgs))
-	}
+	require.Len(t, be.anonmsgs, 1)
 	opts := be.anonmsgs[0].Opts
-	if opts == nil {
-		t.Fatal("MailOptions is nil")
-	}
-	if opts.DeliverBy == nil {
-		t.Fatal("DeliverBy is nil")
-	}
-
-	want := deltasmtp.DeliverByOptions{
+	require.NotNil(t, opts)
+	require.NotNil(t, opts.DeliverBy)
+	require.Equal(t, deltasmtp.DeliverByOptions{
 		Seconds: 100,
 		Mode:    deltasmtp.DeliverByNotify,
 		Trace:   true,
-	}
-	if *opts.DeliverBy != want {
-		t.Fatalf("DeliverBy: want %#v, got %#v", want, *opts.DeliverBy)
-	}
+	}, *opts.DeliverBy)
 }
 
 func TestServerMTPRIORITY(t *testing.T) {
@@ -1889,9 +1202,7 @@ func TestServerMTPRIORITY(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	if !caps["MT-PRIORITY"] {
-		t.Fatal("Missing capability: MT-PRIORITY")
-	}
+	require.True(t, caps["MT-PRIORITY"], "missing capability MT-PRIORITY")
 
 	// RFC 6710 section 3 puts MT-PRIORITY on MAIL FROM, so a bad value must
 	// be rejected before a transaction is opened.
@@ -1902,58 +1213,30 @@ func TestServerMTPRIORITY(t *testing.T) {
 		"MT-PRIORITY=10",
 	}
 	for _, param := range malformed {
-		_, _ = io.WriteString(c, "MAIL FROM:<root@nsa.gov> "+param+"\r\n")
-		if res := readReply(t, c, scanner); !strings.HasPrefix(res, "501 5.5.4") {
-			t.Errorf("MAIL FROM with %q: want 501 5.5.4, got %q", param, res)
-		}
+		res := send(t, c, scanner, "MAIL FROM:<root@nsa.gov> "+param)
+		assert.True(t, strings.HasPrefix(res, "501 5.5.4"), "MAIL FROM with %q: want 501 5.5.4, got %q", param, res)
 	}
 
 	// Range boundaries are accepted.
 	for _, priority := range []int{-9, 0, 9} {
-		_, _ = io.WriteString(c, fmt.Sprintf("MAIL FROM:<root@nsa.gov> MT-PRIORITY=%d\r\n", priority))
-		if res := readReply(t, c, scanner); !strings.HasPrefix(res, "250 ") {
-			t.Errorf("MAIL FROM with MT-PRIORITY=%d: want 250, got %q", priority, res)
-		}
-		_, _ = io.WriteString(c, "RSET\r\n")
-		if res := readReply(t, c, scanner); !strings.HasPrefix(res, "250 ") {
-			t.Fatal("RSET rejected:", res)
-		}
+		res := send(t, c, scanner, fmt.Sprintf("MAIL FROM:<root@nsa.gov> MT-PRIORITY=%d", priority))
+		assert.True(t, strings.HasPrefix(res, "250 "), "MAIL FROM with MT-PRIORITY=%d: want 250, got %q", priority, res)
+		expect(t, c, scanner, "RSET", "250 ")
 	}
 
 	// The value reaches the backend on the completed transaction.
 	const expectedPriority = -2
 
-	_, _ = io.WriteString(c, fmt.Sprintf("MAIL FROM:<root@nsa.gov> MT-PRIORITY=%d\r\n", expectedPriority))
-	if res := readReply(t, c, scanner); !strings.HasPrefix(res, "250 ") {
-		t.Fatal("MAIL FROM rejected:", res)
-	}
-	_, _ = io.WriteString(c, "RCPT TO:<root@gchq.gov.uk>\r\n")
-	if res := readReply(t, c, scanner); !strings.HasPrefix(res, "250 ") {
-		t.Fatal("RCPT TO rejected:", res)
-	}
-	_, _ = io.WriteString(c, "DATA\r\n")
-	if res := readReply(t, c, scanner); !strings.HasPrefix(res, "354 ") {
-		t.Fatal("DATA rejected:", res)
-	}
-	_, _ = io.WriteString(c, "Hey <3\r\n")
-	_, _ = io.WriteString(c, ".\r\n")
-	if res := readReply(t, c, scanner); !strings.HasPrefix(res, "250 ") {
-		t.Fatal("Message rejected:", res)
-	}
+	expect(t, c, scanner, fmt.Sprintf("MAIL FROM:<root@nsa.gov> MT-PRIORITY=%d", expectedPriority), "250 ")
+	expect(t, c, scanner, "RCPT TO:<root@gchq.gov.uk>", "250 ")
+	expect(t, c, scanner, "DATA", "354 ")
+	expect(t, c, scanner, "Hey <3\r\n.", "250 ")
 
-	if len(be.anonmsgs) != 1 {
-		t.Fatalf("Invalid number of sent messages: want 1, got %d", len(be.anonmsgs))
-	}
+	require.Len(t, be.anonmsgs, 1)
 	opts := be.anonmsgs[0].Opts
-	if opts == nil {
-		t.Fatal("MailOptions is nil")
-	}
-	if opts.MTPriority == nil {
-		t.Fatal("MTPriority is nil")
-	}
-	if *opts.MTPriority != expectedPriority {
-		t.Fatalf("MTPriority: want %d, got %d", expectedPriority, *opts.MTPriority)
-	}
+	require.NotNil(t, opts)
+	require.NotNil(t, opts.MTPriority)
+	require.Equal(t, expectedPriority, *opts.MTPriority)
 }
 
 func TestServer_TooLongCommand(t *testing.T) {
@@ -1965,11 +1248,7 @@ func TestServer_TooLongCommand(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	_, _ = io.WriteString(c, "MAIL FROM:<"+strings.Repeat("a", maxLineLength)+">\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "500 5.4.0 ") {
-		t.Fatal("Invalid too long MAIL response:", scanner.Text())
-	}
+	expect(t, c, scanner, "MAIL FROM:<"+strings.Repeat("a", maxLineLength)+">", "500 5.4.0 ")
 }
 
 func TestServerShutdown(t *testing.T) {
@@ -1991,15 +1270,8 @@ func TestServerShutdown(t *testing.T) {
 		_ = c.Close()
 	}
 
-	errOne := <-errChan
-	if errOne != nil {
-		t.Fatal("Expected err to be nil:", errOne)
-	}
-
-	errTwo := <-errChan
-	if errTwo != server.ErrServerClosed {
-		t.Fatal("Expected err to be ErrServerClosed:", errTwo)
-	}
+	require.NoError(t, <-errChan)
+	require.ErrorIs(t, <-errChan, server.ErrServerClosed)
 }
 
 const (
@@ -2017,85 +1289,35 @@ func TestServerDSN(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	if _, ok := caps["DSN"]; !ok {
-		t.Fatal("Missing capability: DSN")
-	}
+	require.True(t, caps["DSN"], "missing capability DSN")
 
-	_, _ = io.WriteString(c, "MAIL FROM:<e=mc2@example.com> envID=e+3Dmc2 Ret=hdrs\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid MAIL response:", scanner.Text())
-	}
-
-	_, _ = io.WriteString(c, "RCPT TO:<e=mc2@example.com> ORcpt=Rfc822;e+3Dmc2@example.com Notify=Never\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid RCPT response:", scanner.Text())
-	}
-
-	_, _ = io.WriteString(c,
+	expect(t, c, scanner, "MAIL FROM:<e=mc2@example.com> envID=e+3Dmc2 Ret=hdrs", "250 ")
+	expect(t, c, scanner, "RCPT TO:<e=mc2@example.com> ORcpt=Rfc822;e+3Dmc2@example.com Notify=Never", "250 ")
+	expect(t, c, scanner,
 		"RCPT TO:<e=mc2@example.com> orcpt=Utf-8;e\\x{3D}mc2@\\x{30C9}\\x{30E1}\\x"+
-			"{30A4}\\x{30F3}\\x{540D}\\x{4F8B}.jp notify=failure,delay\r\n",
+			"{30A4}\\x{30F3}\\x{540D}\\x{4F8B}.jp notify=failure,delay",
+		"250 ",
 	)
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid RCPT response:", scanner.Text())
-	}
 
 	// go on as usual
-	_, _ = io.WriteString(c, "DATA\r\n")
-	scanOk(t, c, scanner)
-	_, _ = io.WriteString(c, "Hey <3\r\n")
-	_, _ = io.WriteString(c, ".\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid DATA response:", scanner.Text())
-	}
-	if len(be.messages) != 0 || len(be.anonmsgs) != 1 {
-		t.Fatal("Invalid number of sent messages:", be.messages, be.anonmsgs)
-	}
+	send(t, c, scanner, "DATA")
+	expect(t, c, scanner, "Hey <3\r\n.", "250 ")
+	require.Empty(t, be.messages)
+	require.Len(t, be.anonmsgs, 1)
 
-	if val := be.anonmsgs[0].Opts.Return; val != deltasmtp.DSNReturnHeaders {
-		t.Fatal("Invalid RET parameter value:", val)
-	}
-	if val := be.anonmsgs[0].Opts.EnvelopeID; val != dsnEnvelopeID {
-		t.Fatal("Invalid ENVID parameter value:", val)
-	}
+	msg := be.anonmsgs[0]
+	require.Equal(t, deltasmtp.DSNReturnHeaders, msg.Opts.Return)
+	require.Equal(t, dsnEnvelopeID, msg.Opts.EnvelopeID)
+	require.Equal(t, []string{dsnEmailRFC822, dsnEmailRFC822}, msg.To)
 
-	to := be.anonmsgs[0].To
-	if to == nil || len(to) != 2 {
-		t.Fatal("Invalid number of recipients:", to)
-	}
-	if val := to[0]; val != dsnEmailRFC822 {
-		t.Fatal("Invalid recipient:", val)
-	}
-	if val := to[1]; val != dsnEmailRFC822 {
-		t.Fatal("Invalid recipient:", val)
-	}
-
-	opts := be.anonmsgs[0].RcptOpts
-	if opts == nil || len(opts) != 2 {
-		t.Fatal("Invalid number of recipients:", opts)
-	}
-	if val := opts[0].Notify; val == nil || len(val) != 1 || val[0] != deltasmtp.DSNNotifyNever {
-		t.Fatal("Invalid NOTIFY parameter value:", val)
-	}
-	if val := opts[0].OriginalRecipientType; val != deltasmtp.DSNAddressTypeRFC822 {
-		t.Fatal("Invalid ORCPT address type:", val)
-	}
-	if val := opts[0].OriginalRecipient; val != dsnEmailRFC822 {
-		t.Fatal("Invalid ORCPT address:", val)
-	}
-	if val := opts[1].Notify; val == nil || len(val) != 2 ||
-		val[0] != deltasmtp.DSNNotifyFailure || val[1] != deltasmtp.DSNNotifyDelayed {
-		t.Fatal("Invalid NOTIFY parameter value:", val)
-	}
-	if val := opts[1].OriginalRecipientType; val != deltasmtp.DSNAddressTypeUTF8 {
-		t.Fatal("Invalid ORCPT address type:", val)
-	}
-	if val := opts[1].OriginalRecipient; val != dsnEmailUTF8 {
-		t.Fatal("Invalid ORCPT address:", val)
-	}
+	opts := msg.RcptOpts
+	require.Len(t, opts, 2)
+	require.Equal(t, []deltasmtp.DSNNotify{deltasmtp.DSNNotifyNever}, opts[0].Notify)
+	require.Equal(t, deltasmtp.DSNAddressTypeRFC822, opts[0].OriginalRecipientType)
+	require.Equal(t, dsnEmailRFC822, opts[0].OriginalRecipient)
+	require.Equal(t, []deltasmtp.DSNNotify{deltasmtp.DSNNotifyFailure, deltasmtp.DSNNotifyDelayed}, opts[1].Notify)
+	require.Equal(t, deltasmtp.DSNAddressTypeUTF8, opts[1].OriginalRecipientType)
+	require.Equal(t, dsnEmailUTF8, opts[1].OriginalRecipient)
 }
 
 func TestSMTPUTF8Disabled(t *testing.T) {
@@ -2107,13 +1329,9 @@ func TestSMTPUTF8Disabled(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	_, _ = io.WriteString(c, "MAIL FROM:<e=mc2@example.com> SMTPUTF8\r\n")
-	scanOk(t, c, scanner)
-	require.Equal(t, "504 5.5.4 SMTPUTF8 is not implemented", scanner.Text())
-
-	_, _ = io.WriteString(c, "VRFY mc2@example.com SMTPUTF8\r\n")
-	scanOk(t, c, scanner)
-	require.Equal(t, "504 5.5.4 SMTPUTF8 is not implemented", scanner.Text())
+	const notImplemented = "504 5.5.4 SMTPUTF8 is not implemented"
+	require.Equal(t, notImplemented, send(t, c, scanner, "MAIL FROM:<e=mc2@example.com> SMTPUTF8"))
+	require.Equal(t, notImplemented, send(t, c, scanner, "VRFY mc2@example.com SMTPUTF8"))
 }
 
 func TestServerDSNwithSMTPUTF8(t *testing.T) {
@@ -2126,107 +1344,42 @@ func TestServerDSNwithSMTPUTF8(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	for _, cap := range []string{"DSN", "SMTPUTF8"} {
-		if _, ok := caps[cap]; !ok {
-			t.Fatal("Missing capability:", cap)
-		}
-	}
+	require.True(t, caps["DSN"], "missing capability DSN")
+	require.True(t, caps["SMTPUTF8"], "missing capability SMTPUTF8")
 
-	_, _ = io.WriteString(c, "MAIL FROM:<e=mc2@example.com> ENVID=e+3Dmc2 RET=HDRS SMTPUTF8\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid MAIL response:", scanner.Text())
-	}
-
-	_, _ = io.WriteString(c, "RCPT TO:<e=mc2@example.com> ORCPT=RFC822;e+3Dmc2@example.com NOTIFY=NEVER\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid RCPT response:", scanner.Text())
-	}
-
-	_, _ = io.WriteString(c,
+	expect(t, c, scanner, "MAIL FROM:<e=mc2@example.com> ENVID=e+3Dmc2 RET=HDRS SMTPUTF8", "250 ")
+	expect(t, c, scanner, "RCPT TO:<e=mc2@example.com> ORCPT=RFC822;e+3Dmc2@example.com NOTIFY=NEVER", "250 ")
+	expect(t, c, scanner,
 		"RCPT TO:<e=mc2@ドメイン名例.jp> ORCPT=UTF-8;e\\x{3D}mc2@\\x"+
-			"{30C9}\\x{30E1}\\x{30A4}\\x{30F3}\\x{540D}\\x{4F8B}.jp NOTIFY=FAILURE,DELAY\r\n",
+			"{30C9}\\x{30E1}\\x{30A4}\\x{30F3}\\x{540D}\\x{4F8B}.jp NOTIFY=FAILURE,DELAY",
+		"250 ",
 	)
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid RCPT response:", scanner.Text())
-	}
-
-	_, _ = io.WriteString(c, "RCPT TO:<e=mc2@ドメイン名例.jp> ORCPT=utf-8;e\\x{3D}mc2@ドメイン名例.jp NOTIFY=SUCCESS\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid RCPT response:", scanner.Text())
-	}
+	expect(t, c, scanner, "RCPT TO:<e=mc2@ドメイン名例.jp> ORCPT=utf-8;e\\x{3D}mc2@ドメイン名例.jp NOTIFY=SUCCESS", "250 ")
 
 	// go on as usual
-	_, _ = io.WriteString(c, "DATA\r\n")
-	scanOk(t, c, scanner)
-	_, _ = io.WriteString(c, "Hey <3\r\n")
-	_, _ = io.WriteString(c, ".\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid DATA response:", scanner.Text())
-	}
-	if len(be.messages) != 0 || len(be.anonmsgs) != 1 {
-		t.Fatal("Invalid number of sent messages:", be.messages, be.anonmsgs)
-	}
+	send(t, c, scanner, "DATA")
+	expect(t, c, scanner, "Hey <3\r\n.", "250 ")
+	require.Empty(t, be.messages)
+	require.Len(t, be.anonmsgs, 1)
 
-	if val := be.anonmsgs[0].Opts.Return; val != deltasmtp.DSNReturnHeaders {
-		t.Fatal("Invalid RET parameter value:", val)
-	}
-	if val := be.anonmsgs[0].Opts.EnvelopeID; val != dsnEnvelopeID {
-		t.Fatal("Invalid ENVID parameter value:", val)
-	}
-
-	to := be.anonmsgs[0].To
-	if to == nil || len(to) != 3 {
-		t.Fatal("Invalid number of recipients:", to)
-	}
-	if val := to[0]; val != dsnEmailRFC822 {
-		t.Fatal("Invalid recipient:", val)
-	}
+	msg := be.anonmsgs[0]
+	require.Equal(t, deltasmtp.DSNReturnHeaders, msg.Opts.Return)
+	require.Equal(t, dsnEnvelopeID, msg.Opts.EnvelopeID)
 	// Non-ASCII UTF-8 is allowed in TO parameter value
-	if val := to[1]; val != dsnEmailUTF8 {
-		t.Fatal("Invalid recipient:", val)
-	}
-	if val := to[2]; val != dsnEmailUTF8 {
-		t.Fatal("Invalid recipient:", val)
-	}
+	require.Equal(t, []string{dsnEmailRFC822, dsnEmailUTF8, dsnEmailUTF8}, msg.To)
 
-	opts := be.anonmsgs[0].RcptOpts
-	if opts == nil || len(opts) != 3 {
-		t.Fatal("Invalid number of recipients:", opts)
-	}
-	if val := opts[0].Notify; val == nil || len(val) != 1 || val[0] != deltasmtp.DSNNotifyNever {
-		t.Fatal("Invalid NOTIFY parameter value:", val)
-	}
-	if val := opts[0].OriginalRecipientType; val != deltasmtp.DSNAddressTypeRFC822 {
-		t.Fatal("Invalid ORCPT address type:", val)
-	}
-	if val := opts[0].OriginalRecipient; val != dsnEmailRFC822 {
-		t.Fatal("Invalid ORCPT address:", val)
-	}
-	if val := opts[1].Notify; val == nil || len(val) != 2 ||
-		val[0] != deltasmtp.DSNNotifyFailure || val[1] != deltasmtp.DSNNotifyDelayed {
-		t.Fatal("Invalid NOTIFY parameter value:", val)
-	}
-	if val := opts[1].OriginalRecipientType; val != deltasmtp.DSNAddressTypeUTF8 {
-		t.Fatal("Invalid ORCPT address type:", val)
-	}
-	if val := opts[1].OriginalRecipient; val != dsnEmailUTF8 {
-		t.Fatal("Invalid ORCPT address:", val)
-	}
+	opts := msg.RcptOpts
+	require.Len(t, opts, 3)
+	require.Equal(t, []deltasmtp.DSNNotify{deltasmtp.DSNNotifyNever}, opts[0].Notify)
+	require.Equal(t, deltasmtp.DSNAddressTypeRFC822, opts[0].OriginalRecipientType)
+	require.Equal(t, dsnEmailRFC822, opts[0].OriginalRecipient)
+	require.Equal(t, []deltasmtp.DSNNotify{deltasmtp.DSNNotifyFailure, deltasmtp.DSNNotifyDelayed}, opts[1].Notify)
+	require.Equal(t, deltasmtp.DSNAddressTypeUTF8, opts[1].OriginalRecipientType)
+	require.Equal(t, dsnEmailUTF8, opts[1].OriginalRecipient)
 	// utf-8-addr-unitext form is allowed in ORCPT parameter value
-	if val := opts[2].Notify; val == nil || len(val) != 1 || val[0] != deltasmtp.DSNNotifySuccess {
-		t.Fatal("Invalid NOTIFY parameter value:", val)
-	}
-	if val := opts[2].OriginalRecipientType; val != deltasmtp.DSNAddressTypeUTF8 {
-		t.Fatal("Invalid ORCPT address type:", val)
-	}
-	if val := opts[2].OriginalRecipient; val != dsnEmailUTF8 {
-		t.Fatal("Invalid ORCPT address:", val)
-	}
+	require.Equal(t, []deltasmtp.DSNNotify{deltasmtp.DSNNotifySuccess}, opts[2].Notify)
+	require.Equal(t, deltasmtp.DSNAddressTypeUTF8, opts[2].OriginalRecipientType)
+	require.Equal(t, dsnEmailUTF8, opts[2].OriginalRecipient)
 }
 
 func TestServerXOORG(t *testing.T) {
@@ -2238,40 +1391,20 @@ func TestServerXOORG(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	for _, cap := range []string{"XOORG"} {
-		if _, ok := caps[cap]; !ok {
-			t.Fatal("Missing capability:", cap)
-		}
-	}
+	require.True(t, caps["XOORG"], "missing capability XOORG")
 
-	_, _ = io.WriteString(c, "MAIL FROM:<e=mc2@example.com> XOORG=test.com\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid MAIL response:", scanner.Text())
-	}
-
-	_, _ = io.WriteString(c, "RCPT TO:<e=mc2@example.com>\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid RCPT response:", scanner.Text())
-	}
+	expect(t, c, scanner, "MAIL FROM:<e=mc2@example.com> XOORG=test.com", "250 ")
+	expect(t, c, scanner, "RCPT TO:<e=mc2@example.com>", "250 ")
 
 	// go on as usual
-	_, _ = io.WriteString(c, "DATA\r\n")
-	scanOk(t, c, scanner)
-	_, _ = io.WriteString(c, "Hey <3\r\n")
-	_, _ = io.WriteString(c, ".\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid DATA response:", scanner.Text())
-	}
-	if len(be.messages) != 0 || len(be.anonmsgs) != 1 {
-		t.Fatal("Invalid number of sent messages:", be.messages, be.anonmsgs)
-	}
+	send(t, c, scanner, "DATA")
+	expect(t, c, scanner, "Hey <3\r\n.", "250 ")
+	require.Empty(t, be.messages)
+	require.Len(t, be.anonmsgs, 1)
 
-	if val := be.anonmsgs[0].Opts.XOORG; *val != "test.com" {
-		t.Fatal("Invalid XOORG parameter value:", val)
-	}
+	val := be.anonmsgs[0].Opts.XOORG
+	require.NotNil(t, val)
+	require.Equal(t, "test.com", *val)
 }
 
 func TestServer_DefaultMaxLineLength(t *testing.T) {
@@ -2281,11 +1414,7 @@ func TestServer_DefaultMaxLineLength(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	_, _ = io.WriteString(c, "MAIL FROM:<"+strings.Repeat("a", 12288)+">\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "500 5.4.0 ") {
-		t.Fatal("Invalid too long MAIL response:", scanner.Text())
-	}
+	expect(t, c, scanner, "MAIL FROM:<"+strings.Repeat("a", 12288)+">", "500 5.4.0 ")
 }
 
 func TestServer_DefaultMaxMessageBytes(t *testing.T) {
@@ -2295,10 +1424,7 @@ func TestServer_DefaultMaxMessageBytes(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	want := "SIZE " + strconv.Itoa(32<<20)
-	if !caps[want] {
-		t.Fatalf("Missing capability %q, got %v", want, caps)
-	}
+	require.Contains(t, caps, "SIZE "+strconv.Itoa(32<<20))
 }
 
 // RFC 9422: MAILMAX and RCPTMAX are advertised with their defaults.
@@ -2309,10 +1435,7 @@ func TestServer_DefaultLimits(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	want := "LIMITS MAILMAX=1000 RCPTMAX=1000"
-	if !caps[want] {
-		t.Fatalf("Missing capability %q, got %v", want, caps)
-	}
+	require.Contains(t, caps, "LIMITS MAILMAX=1000 RCPTMAX=1000")
 }
 
 func TestServer_CommandTimeoutIdle(t *testing.T) {
@@ -2324,22 +1447,17 @@ func TestServer_CommandTimeoutIdle(t *testing.T) {
 
 	time.Sleep(300 * time.Millisecond)
 
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "421 4.4.2 ") {
-		t.Fatal("Invalid idle timeout response:", scanner.Text())
-	}
-	if scan(t, c, scanner) {
-		t.Fatal("Expected connection to be closed, got:", scanner.Text())
-	}
+	requirePrefix(t, readReply(t, c, scanner), "421 4.4.2 ")
+	require.False(t, scan(t, c, scanner), "expected connection to be closed, got: %q", scanner.Text())
 }
 
 // requireIdleTimeout waits for the idle timeout reply and checks that it took at
 // least the timeout and at most 125% of it (lazy renewal), with some slack.
 func requireIdleTimeout(t *testing.T, c net.Conn, scanner *bufio.Scanner, since time.Time, timeout time.Duration) {
 	t.Helper()
-	scanOk(t, c, scanner)
+	reply := readReply(t, c, scanner)
 	elapsed := time.Since(since)
-	require.True(t, strings.HasPrefix(scanner.Text(), "421 4.4.2 "), scanner.Text())
+	requirePrefix(t, reply, "421 4.4.2 ")
 	require.GreaterOrEqual(t, elapsed, timeout-10*time.Millisecond)
 	require.Less(t, elapsed, timeout*5/4+100*time.Millisecond)
 }
@@ -2357,14 +1475,10 @@ func TestServer_CommandTimeoutRenewed(t *testing.T) {
 	// 3.5 times the timeout in total
 	for range 3 {
 		time.Sleep(timeout / 5) // the renewal for this command is skipped
-		_, _ = io.WriteString(c, "NOOP\r\n")
-		scanOk(t, c, scanner)
-		require.True(t, strings.HasPrefix(scanner.Text(), "250 "), scanner.Text())
+		expect(t, c, scanner, "NOOP", "250 ")
 
 		time.Sleep(timeout * 19 / 20) // slow, but in time
-		_, _ = io.WriteString(c, "NOOP\r\n")
-		scanOk(t, c, scanner)
-		require.True(t, strings.HasPrefix(scanner.Text(), "250 "), scanner.Text())
+		expect(t, c, scanner, "NOOP", "250 ")
 	}
 
 	requireIdleTimeout(t, c, scanner, time.Now(), timeout)
@@ -2381,17 +1495,10 @@ func TestServer_CommandTimeoutAfterData(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	_, _ = io.WriteString(c, "MAIL FROM:<root@nsa.gov>\r\n")
-	scanOk(t, c, scanner)
-	_, _ = io.WriteString(c, "RCPT TO:<root@gchq.gov.uk>\r\n")
-	scanOk(t, c, scanner)
-	_, _ = io.WriteString(c, "DATA\r\n")
-	scanOk(t, c, scanner)
-	require.True(t, strings.HasPrefix(scanner.Text(), "354 "), scanner.Text())
-
-	_, _ = io.WriteString(c, "From: root@nsa.gov\r\n\r\nHey\r\n.\r\n")
-	scanOk(t, c, scanner)
-	require.True(t, strings.HasPrefix(scanner.Text(), "250 "), scanner.Text())
+	send(t, c, scanner, "MAIL FROM:<root@nsa.gov>")
+	send(t, c, scanner, "RCPT TO:<root@gchq.gov.uk>")
+	expect(t, c, scanner, "DATA", "354 ")
+	expect(t, c, scanner, "From: root@nsa.gov\r\n\r\nHey\r\n.", "250 ")
 
 	// not the data deadline of 10 seconds
 	requireIdleTimeout(t, c, scanner, time.Now(), timeout)
@@ -2405,18 +1512,12 @@ func TestServer_DataTimeoutStalled(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	_, _ = io.WriteString(c, "MAIL FROM:<root@nsa.gov>\r\n")
-	scanOk(t, c, scanner)
-	_, _ = io.WriteString(c, "RCPT TO:<root@gchq.gov.uk>\r\n")
-	scanOk(t, c, scanner)
-	_, _ = io.WriteString(c, "DATA\r\n")
-	scanOk(t, c, scanner)
+	send(t, c, scanner, "MAIL FROM:<root@nsa.gov>")
+	send(t, c, scanner, "RCPT TO:<root@gchq.gov.uk>")
+	send(t, c, scanner, "DATA")
 	_, _ = io.WriteString(c, "From: root@nsa.gov\r\n\r\nonly a part")
 
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "421 4.4.2 ") {
-		t.Fatal("Invalid response for stalled DATA:", scanner.Text())
-	}
+	requirePrefix(t, readReply(t, c, scanner), "421 4.4.2 ")
 }
 
 // DATA uses the data timeout, a transfer taking longer than the read timeout must succeed.
@@ -2427,30 +1528,17 @@ func TestServer_CommandTimeoutSlowData(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	_, _ = io.WriteString(c, "MAIL FROM:<root@nsa.gov>\r\n")
-	scanOk(t, c, scanner)
-	_, _ = io.WriteString(c, "RCPT TO:<root@gchq.gov.uk>\r\n")
-	scanOk(t, c, scanner)
-	_, _ = io.WriteString(c, "DATA\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "354 ") {
-		t.Fatal("Invalid DATA response:", scanner.Text())
-	}
+	send(t, c, scanner, "MAIL FROM:<root@nsa.gov>")
+	send(t, c, scanner, "RCPT TO:<root@gchq.gov.uk>")
+	expect(t, c, scanner, "DATA", "354 ")
 
 	_, _ = io.WriteString(c, "From: root@nsa.gov\r\n\r\n")
 	for range 6 {
 		time.Sleep(50 * time.Millisecond)
 		_, _ = io.WriteString(c, "slow line\r\n")
 	}
-	_, _ = io.WriteString(c, ".\r\n")
-
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid DATA response:", scanner.Text())
-	}
-	if len(be.messages) != 1 {
-		t.Fatal("Invalid number of sent messages:", be.messages)
-	}
+	expect(t, c, scanner, ".", "250 ")
+	require.Len(t, be.messages, 1)
 }
 
 // The data timeout limits the whole DATA transfer, even if the client keeps sending.
@@ -2461,24 +1549,16 @@ func TestServer_DataTimeoutWholeTransfer(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	_, _ = io.WriteString(c, "MAIL FROM:<root@nsa.gov>\r\n")
-	scanOk(t, c, scanner)
-	_, _ = io.WriteString(c, "RCPT TO:<root@gchq.gov.uk>\r\n")
-	scanOk(t, c, scanner)
-	_, _ = io.WriteString(c, "DATA\r\n")
-	scanOk(t, c, scanner)
+	send(t, c, scanner, "MAIL FROM:<root@nsa.gov>")
+	send(t, c, scanner, "RCPT TO:<root@gchq.gov.uk>")
+	send(t, c, scanner, "DATA")
 
 	_, _ = io.WriteString(c, "From: root@nsa.gov\r\n\r\n")
 	for range 6 {
 		time.Sleep(50 * time.Millisecond)
 		_, _ = io.WriteString(c, "slow line\r\n")
 	}
-	_, _ = io.WriteString(c, ".\r\n")
-
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "421 4.4.2 ") {
-		t.Fatal("Invalid response for too long DATA:", scanner.Text())
-	}
+	expect(t, c, scanner, ".", "421 4.4.2 ")
 }
 
 // After a transfer the data deadline must not stay active, even if the read timeout is disabled.
@@ -2490,25 +1570,14 @@ func TestServer_DataTimeoutClearedAfterTransfer(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	_, _ = io.WriteString(c, "MAIL FROM:<root@nsa.gov>\r\n")
-	scanOk(t, c, scanner)
-	_, _ = io.WriteString(c, "RCPT TO:<root@gchq.gov.uk>\r\n")
-	scanOk(t, c, scanner)
-	_, _ = io.WriteString(c, "DATA\r\n")
-	scanOk(t, c, scanner)
-	_, _ = io.WriteString(c, "From: root@nsa.gov\r\n\r\nHey\r\n.\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid DATA response:", scanner.Text())
-	}
+	send(t, c, scanner, "MAIL FROM:<root@nsa.gov>")
+	send(t, c, scanner, "RCPT TO:<root@gchq.gov.uk>")
+	send(t, c, scanner, "DATA")
+	expect(t, c, scanner, "From: root@nsa.gov\r\n\r\nHey\r\n.", "250 ")
 
 	time.Sleep(200 * time.Millisecond)
 
-	_, _ = io.WriteString(c, "NOOP\r\n")
-	scanOk(t, c, scanner)
-	if !strings.HasPrefix(scanner.Text(), "250 ") {
-		t.Fatal("Invalid NOOP response:", scanner.Text())
-	}
+	expect(t, c, scanner, "NOOP", "250 ")
 }
 
 // TestServer_MultiDigitEnhancedCode checks that a backend's enhanced code with a
@@ -2517,11 +1586,8 @@ func TestServer_MultiDigitEnhancedCode(t *testing.T) {
 	rejected := deltasmtp.NewStatusM(550, deltasmtp.EnhancedCode{5, 7, 26}, []string{"DMARC", "policy"})
 	_, c, scanner := limitTestServer(t, &backend{rejectAfterOpen: rejected}, 0)
 
-	_, _ = io.WriteString(c, "DATA\r\n")
-	require.True(t, strings.HasPrefix(readReply(t, c, scanner), "354 "))
-	_, _ = io.WriteString(c, "Hello\r\n.\r\n")
-
-	require.Equal(t, "550-5.7.26 DMARC", readReply(t, c, scanner))
+	expect(t, c, scanner, "DATA", "354 ")
+	require.Equal(t, "550-5.7.26 DMARC", send(t, c, scanner, "Hello\r\n."))
 	require.Equal(t, "550 5.7.26 policy", readReply(t, c, scanner))
 }
 

@@ -2,6 +2,8 @@ package parse
 
 import (
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestParser(t *testing.T) {
@@ -18,12 +20,9 @@ func TestParser(t *testing.T) {
 	for _, tc := range validReversePaths {
 		p := Parser{tc.raw}
 		path, err := p.ReversePath()
-		if err != nil {
-			t.Errorf("parser.parseReversePath(%q) = %v", tc.raw, err)
-		} else if path != tc.path {
-			t.Errorf("parser.parseReversePath(%q) = %q, want %q", tc.raw, path, tc.path)
-		} else if p.S != tc.after {
-			t.Errorf("parser.parseReversePath(%q): got after = %q, want %q", tc.raw, p.S, tc.after)
+		if assert.NoError(t, err, tc.raw) {
+			assert.Equal(t, tc.path, path, tc.raw)
+			assert.Equal(t, tc.after, p.S, tc.raw)
 		}
 	}
 
@@ -39,9 +38,8 @@ func TestParser(t *testing.T) {
 	}
 	for _, tc := range invalidReversePaths {
 		p := Parser{tc}
-		if path, err := p.ReversePath(); err == nil {
-			t.Errorf("parser.parseReversePath(%q) = %q, want error", tc, path)
-		}
+		_, err := p.ReversePath()
+		assert.Error(t, err, tc)
 	}
 }
 
@@ -81,12 +79,9 @@ func TestParserPath(t *testing.T) {
 	for _, tc := range valid {
 		p := Parser{tc.raw}
 		path, err := p.Path()
-		if err != nil {
-			t.Errorf("Path(%q) = %v", tc.raw, err)
-		} else if path != tc.path {
-			t.Errorf("Path(%q) = %q, want %q", tc.raw, path, tc.path)
-		} else if p.S != tc.after {
-			t.Errorf("Path(%q): got after = %q, want %q", tc.raw, p.S, tc.after)
+		if assert.NoError(t, err, tc.raw) {
+			assert.Equal(t, tc.path, path, tc.raw)
+			assert.Equal(t, tc.after, p.S, tc.raw)
 		}
 	}
 
@@ -148,9 +143,8 @@ func TestParserPath(t *testing.T) {
 	}
 	for _, tc := range invalid {
 		p := Parser{tc}
-		if path, err := p.Path(); err == nil {
-			t.Errorf("Path(%q) = %q, want error", tc, path)
-		}
+		_, err := p.Path()
+		assert.Error(t, err, tc)
 	}
 }
 
@@ -162,10 +156,9 @@ func TestParserMailbox(t *testing.T) {
 	} {
 		p := Parser{tc.raw}
 		mbox, err := p.Mailbox()
-		if err != nil {
-			t.Errorf("Mailbox(%q) = %v", tc.raw, err)
-		} else if mbox != tc.mbox || p.S != tc.after {
-			t.Errorf("Mailbox(%q) = %q, %q, want %q, %q", tc.raw, mbox, p.S, tc.mbox, tc.after)
+		if assert.NoError(t, err, tc.raw) {
+			assert.Equal(t, tc.mbox, mbox, tc.raw)
+			assert.Equal(t, tc.after, p.S, tc.raw)
 		}
 	}
 }
@@ -179,8 +172,6 @@ func TestIsASCII(t *testing.T) {
 		"user@bücher.de":   false,
 		"\x80":             false,
 	} {
-		if got := IsASCII(s); got != want {
-			t.Errorf("IsASCII(%q) = %v, want %v", s, got, want)
-		}
+		assert.Equal(t, want, IsASCII(s), s)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"github.com/uponusolutions/deltasmtp/server"
 )
 
@@ -36,9 +37,7 @@ func TestServerChunkingDefault(t *testing.T) {
 				_ = c.Close()
 			}()
 
-			if caps["CHUNKING"] != tc.want {
-				t.Fatalf("CHUNKING advertised = %v, want %v", caps["CHUNKING"], tc.want)
-			}
+			require.Equal(t, tc.want, caps["CHUNKING"], "CHUNKING advertised")
 		})
 	}
 }
@@ -50,25 +49,15 @@ func TestServerBdatDiscard(t *testing.T) {
 		_ = s.Close()
 		_ = c.Close()
 	}()
-
-	if !caps["CHUNKING"] {
-		t.Fatal("server does not advertise CHUNKING")
-	}
+	require.True(t, caps["CHUNKING"], "server does not advertise CHUNKING")
 
 	// MAIL FROM as chunk content
 	_, _ = io.WriteString(c, "BDAT 9 LAST\r\nMAIL FROM")
-	scan(t, c, scanner)
-	if reply := scanner.Text(); !strings.HasPrefix(reply, "5") {
-		t.Fatal("Invalid BDAT response:", reply)
-	}
+	requirePrefix(t, readReply(t, c, scanner), "5")
 
-	_, _ = io.WriteString(c, "NOOP\r\n")
-	scan(t, c, scanner)
-	if reply := scanner.Text(); !strings.HasPrefix(reply, "250 2.0.0") {
-		// If BDAT chunk isn't discarded, MAIL FROM is executed as command
-		// 501 5.5.2 Was expecting MAIL arg syntax of FROM:<address>
-		t.Fatalf("Invalid NOOP response: %v", reply)
-	}
+	// If the BDAT chunk isn't discarded, MAIL FROM is executed as command:
+	// 501 5.5.2 Was expecting MAIL arg syntax of FROM:<address>
+	expect(t, c, scanner, "NOOP", "250 2.0.0")
 }
 
 // TestServerBdatDiscard checks if a BDAT chunk is discarded if it is issued without recipients.
@@ -78,31 +67,16 @@ func TestServerBdatNoRecipientsDiscard(t *testing.T) {
 		_ = s.Close()
 		_ = c.Close()
 	}()
+	require.True(t, caps["CHUNKING"], "server does not advertise CHUNKING")
 
-	if !caps["CHUNKING"] {
-		t.Fatal("server does not advertise CHUNKING")
-	}
-
-	_, _ = io.WriteString(c, "MAIL FROM:<alice@wonderland.book>\r\n")
-	scan(t, c, scanner)
-	if reply := scanner.Text(); !strings.HasPrefix(reply, "250 2.0.0") {
-		t.Fatalf("Invalid MAIL FROM response: %v", reply)
-	}
+	expect(t, c, scanner, "MAIL FROM:<alice@wonderland.book>", "250 2.0.0")
 
 	// RCPT TO as chunk content
 	_, _ = io.WriteString(c, "BDAT 7 LAST\r\nRCPT TO")
-	scan(t, c, scanner)
-	if reply := scanner.Text(); !strings.HasPrefix(reply, "5") {
-		t.Fatal("Invalid BDAT response:", reply)
-	}
+	requirePrefix(t, readReply(t, c, scanner), "5")
 
-	_, _ = io.WriteString(c, "NOOP\r\n")
-	scan(t, c, scanner)
-	if reply := scanner.Text(); !strings.HasPrefix(reply, "250 2.0.0") {
-		// If BDAT chunk isn't discarded, MAIL FROM is executed as command
-		// 501 5.5.2 Was expecting MAIL arg syntax of FROM:<address>
-		t.Fatalf("Invalid NOOP response: %v", reply)
-	}
+	// If the BDAT chunk isn't discarded, RCPT TO is executed as command.
+	expect(t, c, scanner, "NOOP", "250 2.0.0")
 }
 
 // writeSlowly writes s in parts with pauses, taking longer in total than the read timeout.
@@ -124,22 +98,16 @@ func TestServerBdatCommandTimeoutSlowChunk(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	_, _ = io.WriteString(c, "MAIL FROM:<alice@wonderland.book>\r\n")
-	scanOk(t, c, scanner)
-	_, _ = io.WriteString(c, "RCPT TO:<bob@wonderland.book>\r\n")
-	scanOk(t, c, scanner)
+	send(t, c, scanner, "MAIL FROM:<alice@wonderland.book>")
+	send(t, c, scanner, "RCPT TO:<bob@wonderland.book>")
 
 	body := "From: alice@wonderland.book\r\n\r\nslow but steady\r\n"
 	_, _ = io.WriteString(c, "BDAT "+strconv.Itoa(len(body))+" LAST\r\n")
 	writeSlowly(c, body, 6, 50*time.Millisecond)
 
-	scanOk(t, c, scanner)
-	if reply := scanner.Text(); !strings.HasPrefix(reply, "250 ") {
-		t.Fatal("Invalid BDAT response:", reply)
-	}
-	if len(be.anonmsgs) != 1 || be.anonmsgs[0].Data == nil {
-		t.Fatal("Invalid number of sent messages:", be.anonmsgs)
-	}
+	requirePrefix(t, readReply(t, c, scanner), "250 ")
+	require.Len(t, be.anonmsgs, 1)
+	require.NotNil(t, be.anonmsgs[0].Data)
 }
 
 // Discarding a BDAT chunk uses the data timeout, it may take longer than the read timeout.
@@ -151,24 +119,15 @@ func TestServerBdatCommandTimeoutSlowDiscard(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	_, _ = io.WriteString(c, "MAIL FROM:<alice@wonderland.book>\r\n")
-	scanOk(t, c, scanner)
+	send(t, c, scanner, "MAIL FROM:<alice@wonderland.book>")
 
 	// no recipients, the chunk gets discarded
 	body := strings.Repeat("x", 60)
 	_, _ = io.WriteString(c, "BDAT "+strconv.Itoa(len(body))+" LAST\r\n")
 	writeSlowly(c, body, 6, 50*time.Millisecond)
 
-	scanOk(t, c, scanner)
-	if reply := scanner.Text(); !strings.HasPrefix(reply, "5") {
-		t.Fatal("Invalid BDAT response:", reply)
-	}
-
-	_, _ = io.WriteString(c, "NOOP\r\n")
-	scanOk(t, c, scanner)
-	if reply := scanner.Text(); !strings.HasPrefix(reply, "250 ") {
-		t.Fatal("Invalid NOOP response:", reply)
-	}
+	requirePrefix(t, readReply(t, c, scanner), "5")
+	expect(t, c, scanner, "NOOP", "250 ")
 }
 
 // A client going silent in the middle of a BDAT chunk is disconnected after the data timeout.
@@ -180,17 +139,11 @@ func TestServerBdatDataTimeoutStalled(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	_, _ = io.WriteString(c, "MAIL FROM:<alice@wonderland.book>\r\n")
-	scanOk(t, c, scanner)
-	_, _ = io.WriteString(c, "RCPT TO:<bob@wonderland.book>\r\n")
-	scanOk(t, c, scanner)
+	send(t, c, scanner, "MAIL FROM:<alice@wonderland.book>")
+	send(t, c, scanner, "RCPT TO:<bob@wonderland.book>")
 
 	_, _ = io.WriteString(c, "BDAT 100 LAST\r\nonly a part")
-
-	scanOk(t, c, scanner)
-	if reply := scanner.Text(); !strings.HasPrefix(reply, "421 4.4.2 ") {
-		t.Fatal("Invalid response for stalled BDAT:", reply)
-	}
+	requirePrefix(t, readReply(t, c, scanner), "421 4.4.2 ")
 }
 
 // The data timeout covers all chunks of a BDAT transfer, including the command lines in between.
@@ -202,26 +155,19 @@ func TestServerBdatDataTimeoutWholeTransfer(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	_, _ = io.WriteString(c, "MAIL FROM:<alice@wonderland.book>\r\n")
-	scanOk(t, c, scanner)
-	_, _ = io.WriteString(c, "RCPT TO:<bob@wonderland.book>\r\n")
-	scanOk(t, c, scanner)
+	send(t, c, scanner, "MAIL FROM:<alice@wonderland.book>")
+	send(t, c, scanner, "RCPT TO:<bob@wonderland.book>")
 
 	// every chunk is fast, but the transfer as a whole is too slow
 	for i := range 10 {
 		_, _ = io.WriteString(c, "BDAT 3\r\nabc")
-		scanOk(t, c, scanner)
-		reply := scanner.Text()
+		reply := readReply(t, c, scanner)
 		if strings.HasPrefix(reply, "421 4.4.2 ") {
-			if i == 0 {
-				t.Fatal("First chunk should be accepted")
-			}
+			require.NotZero(t, i, "first chunk should be accepted")
 			return
 		}
-		if !strings.HasPrefix(reply, "250 ") {
-			t.Fatal("Invalid BDAT response:", reply)
-		}
+		requirePrefix(t, reply, "250 ")
 		time.Sleep(50 * time.Millisecond)
 	}
-	t.Fatal("Expected the data timeout to end the BDAT transfer")
+	require.FailNow(t, "expected the data timeout to end the BDAT transfer")
 }

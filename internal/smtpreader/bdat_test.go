@@ -10,6 +10,29 @@ import (
 	"github.com/uponusolutions/deltasmtp"
 )
 
+// firstBdat reads the first BDAT command of input and returns the remaining
+// input and the parsed arguments of the command.
+func firstBdat(t *testing.T, input string) (in *bufio.Reader, size int64, last bool) {
+	t.Helper()
+	in = bufio.NewReader(strings.NewReader(input))
+	line, prefix, err := in.ReadLine()
+	require.NoError(t, err)
+	require.False(t, prefix)
+	size, last, err = BdatArg(string(line[5:]))
+	require.NoError(t, err)
+	return in, size, last
+}
+
+// nextBdat returns a nextCommand function reading the following commands from in.
+func nextBdat(t *testing.T, in *bufio.Reader) func() (string, string, error) {
+	return func() (string, string, error) {
+		line, prefix, err := in.ReadLine()
+		require.NoError(t, err)
+		require.False(t, prefix)
+		return string(line[0:4]), string(line[5:]), nil
+	}
+}
+
 func TestBdatReaderArgErrors(t *testing.T) {
 	t.Run("NoArguments", func(t *testing.T) {
 		_, _, err := BdatArg("")
@@ -30,175 +53,66 @@ func TestBdatReaderArgErrors(t *testing.T) {
 	})
 
 	t.Run("InvalidArgAtStart", func(t *testing.T) {
-		input := "BDAT 3\r\nhapBDAT 0 LAST\r\n"
-		readerInput := bufio.NewReader(strings.NewReader(input))
-
-		_, prefix, err := readerInput.ReadLine()
-		require.NoError(t, err)
-		require.False(t, prefix)
-
-		_, _, err = BdatArg("4 FIRST")
+		_, _, _ = firstBdat(t, "BDAT 3\r\nhapBDAT 0 LAST\r\n")
+		_, _, err := BdatArg("4 FIRST")
 		require.ErrorContains(t, err, "501")
 	})
 
 	t.Run("InvalidArgNextCommand", func(t *testing.T) {
-		input := "BDAT 3\r\nhapBDAT 0 LAST\r\n"
-		readerInput := bufio.NewReader(strings.NewReader(input))
-
-		byteArg, prefix, err := readerInput.ReadLine()
-		arg := string(byteArg)
-		require.NoError(t, err)
-		require.False(t, prefix)
-		size, last, err := BdatArg(arg[5:])
-		require.NoError(t, err)
-		reader := NewBdat(size, last, 0, readerInput, func() (string, string, error) {
+		in, size, last := firstBdat(t, "BDAT 3\r\nhapBDAT 0 LAST\r\n")
+		_, err := io.ReadAll(NewBdat(size, last, 0, in, func() (string, string, error) {
 			return "BDAT", "4 FIRST", nil
-		})
-		_, err = io.ReadAll(reader)
+		}))
 		require.ErrorContains(t, err, "501")
 
-		size, last, err = BdatArg(arg[5:])
-		require.NoError(t, err)
-		reader = NewBdat(size, last, 0, readerInput, func() (string, string, error) {
+		_, err = io.ReadAll(NewBdat(size, last, 0, in, func() (string, string, error) {
 			return "STRANGE", "4 LAST", nil
-		})
-		_, err = io.ReadAll(reader)
+		}))
 		require.ErrorContains(t, err, "501")
 	})
 }
 
 func TestBdatReader(t *testing.T) {
 	t.Run("LastWithoutData", func(t *testing.T) {
-		input := "BDAT 3\r\nhapBDAT 0 LAST\r\n"
-		readerInput := bufio.NewReader(strings.NewReader(input))
-
-		byteArg, prefix, err := readerInput.ReadLine()
-		arg := string(byteArg)
+		in, size, last := firstBdat(t, "BDAT 3\r\nhapBDAT 0 LAST\r\n")
+		res, err := io.ReadAll(NewBdat(size, last, 0, in, nextBdat(t, in)))
 		require.NoError(t, err)
-		require.False(t, prefix)
-
-		size, last, err := BdatArg(arg[5:])
-		require.NoError(t, err)
-		reader := NewBdat(size, last, 0, readerInput, func() (string, string, error) {
-			byteArg, prefix, err := readerInput.ReadLine()
-			arg := string(byteArg)
-
-			require.NoError(t, err)
-			require.False(t, prefix)
-			return arg[0:4], arg[5:], nil
-		})
-		res, err := io.ReadAll(reader)
-		require.NoError(t, err)
-
 		require.Equal(t, "hap", string(res))
 	})
 
 	t.Run("NoChunkingLimit", func(t *testing.T) {
-		input := "BDAT 3\r\nhapBDAT 2 LAST\r\npy"
-		readerInput := bufio.NewReader(strings.NewReader(input))
-
-		byteArg, prefix, err := readerInput.ReadLine()
-		arg := string(byteArg)
+		in, size, last := firstBdat(t, "BDAT 3\r\nhapBDAT 2 LAST\r\npy")
+		res, err := io.ReadAll(NewBdat(size, last, 0, in, nextBdat(t, in)))
 		require.NoError(t, err)
-		require.False(t, prefix)
-
-		size, last, err := BdatArg(arg[5:])
-		require.NoError(t, err)
-		reader := NewBdat(size, last, 0, readerInput, func() (string, string, error) {
-			byteArg, prefix, err := readerInput.ReadLine()
-			arg := string(byteArg)
-
-			require.NoError(t, err)
-			require.False(t, prefix)
-			return arg[0:4], arg[5:], nil
-		})
-		res, err := io.ReadAll(reader)
-		require.NoError(t, err)
-
 		require.Equal(t, "happy", string(res))
 	})
 
 	t.Run("MaxMessageSizeExceeded", func(t *testing.T) {
-		input := "BDAT 3\r\nhapBDAT 2 LAST\r\npy"
-		readerInput := bufio.NewReader(strings.NewReader(input))
-
-		byteArg, prefix, err := readerInput.ReadLine()
-		arg := string(byteArg)
-		require.NoError(t, err)
-		require.False(t, prefix)
-
-		size, last, err := BdatArg(arg[5:])
-		require.NoError(t, err)
-		reader := NewBdat(size, last, 4, readerInput, func() (string, string, error) {
-			byteArg, prefix, err := readerInput.ReadLine()
-			arg := string(byteArg)
-
-			require.NoError(t, err)
-			require.False(t, prefix)
-			return arg[0:4], arg[5:], nil
-		})
-		_, err = io.ReadAll(reader)
+		in, size, last := firstBdat(t, "BDAT 3\r\nhapBDAT 2 LAST\r\npy")
+		_, err := io.ReadAll(NewBdat(size, last, 4, in, nextBdat(t, in)))
 		require.ErrorIs(t, err, deltasmtp.ErrDataTooLarge)
 	})
 
 	t.Run("ToFewBytes", func(t *testing.T) {
-		input := "BDAT 3\r\nhapBDAT 2 LAST\r\np"
-		readerInput := bufio.NewReader(strings.NewReader(input))
-
-		byteArg, prefix, err := readerInput.ReadLine()
-		arg := string(byteArg)
-		require.NoError(t, err)
-		require.False(t, prefix)
-
-		size, last, err := BdatArg(arg[5:])
-		require.NoError(t, err)
-		reader := NewBdat(size, last, 6, readerInput, func() (string, string, error) {
-			byteArg, prefix, err := readerInput.ReadLine()
-			arg := string(byteArg)
-
-			require.NoError(t, err)
-			require.False(t, prefix)
-			return arg[0:4], arg[5:], nil
-		})
-		_, err = io.ReadAll(reader)
+		in, size, last := firstBdat(t, "BDAT 3\r\nhapBDAT 2 LAST\r\np")
+		_, err := io.ReadAll(NewBdat(size, last, 6, in, nextBdat(t, in)))
 		require.ErrorIs(t, err, deltasmtp.ErrConnection)
 	})
 
 	t.Run("NextCommandErrorEOF", func(t *testing.T) {
-		input := "BDAT 3\r\nhapBDAT 2 LAST\r\npy"
-		readerInput := bufio.NewReader(strings.NewReader(input))
-
-		byteArg, prefix, err := readerInput.ReadLine()
-		arg := string(byteArg)
-		require.NoError(t, err)
-		require.False(t, prefix)
-
-		size, last, err := BdatArg(arg[5:])
-		require.NoError(t, err)
-		reader := NewBdat(size, last, 4, readerInput, func() (string, string, error) {
+		in, size, last := firstBdat(t, "BDAT 3\r\nhapBDAT 2 LAST\r\npy")
+		_, err := io.ReadAll(NewBdat(size, last, 4, in, func() (string, string, error) {
 			return "", "", io.EOF
-		})
-		_, err = io.ReadAll(reader)
-		require.ErrorIs(t, deltasmtp.ErrConnection, err)
+		}))
+		require.ErrorIs(t, err, deltasmtp.ErrConnection)
 	})
 
 	t.Run("NextCommandErrorRandomSmtpError", func(t *testing.T) {
-		input := "BDAT 3\r\nhapBDAT 2 LAST\r\npy"
-		readerInput := bufio.NewReader(strings.NewReader(input))
-
-		byteArg, prefix, err := readerInput.ReadLine()
-		arg := string(byteArg)
-		require.NoError(t, err)
-		require.False(t, prefix)
-
-		size, last, err := BdatArg(arg[5:])
-		require.NoError(t, err)
-		reader := NewBdat(size, last, 4, readerInput, func() (string, string, error) {
+		in, size, last := firstBdat(t, "BDAT 3\r\nhapBDAT 2 LAST\r\npy")
+		_, err := io.ReadAll(NewBdat(size, last, 4, in, func() (string, string, error) {
 			return "", "", deltasmtp.ErrAuthFailed
-		})
-		require.NoError(t, err)
-		_, err = io.ReadAll(reader)
-		require.ErrorIs(t, deltasmtp.ErrAuthFailed, err)
+		}))
+		require.ErrorIs(t, err, deltasmtp.ErrAuthFailed)
 	})
 }
 
@@ -215,12 +129,7 @@ func TestBdatReaderLimitSticky(t *testing.T) {
 		{name: "SecondChunk", input: "BDAT 3\r\nhapBDAT 2 LAST\r\npyNOOP\r\n", read: "hap", rest: "pyNOOP\r\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			readerInput := bufio.NewReader(strings.NewReader(tc.input))
-			line, _, err := readerInput.ReadLine()
-			require.NoError(t, err)
-			size, last, err := BdatArg(string(line[5:]))
-			require.NoError(t, err)
-
+			readerInput, size, last := firstBdat(t, tc.input)
 			reader := NewBdat(size, last, 4, readerInput, func() (string, string, error) {
 				line, _, err := readerInput.ReadLine()
 				if err != nil {

@@ -18,136 +18,39 @@ func reader(in string, out *bytes.Buffer) *Receiver {
 
 func TestReadLine(t *testing.T) {
 	r := reader("line1\nline2\n", &bytes.Buffer{})
+	for _, want := range []string{"line1", "line2"} {
+		s, err := r.ReadFullLine()
+		require.NoError(t, err)
+		require.Equal(t, want, s)
+	}
 	s, err := r.ReadFullLine()
-	if s != "line1" || err != nil {
-		t.Fatalf("Line 1: %s, %v", s, err)
-	}
-	s, err = r.ReadFullLine()
-	if s != "line2" || err != nil {
-		t.Fatalf("Line 2: %s, %v", s, err)
-	}
-	s, err = r.ReadFullLine()
-	if s != "" || err != io.EOF {
-		t.Fatalf("EOF: %s, %v", s, err)
-	}
+	require.Equal(t, io.EOF, err)
+	require.Empty(t, s)
 }
 
-type parseFirstCodeLineTest struct {
+var parseFirstCodeLineTests = []struct {
 	codeLine        string
 	wantCode        int
 	wantContinued   bool
 	wantEnhCode     deltasmtp.EnhancedCode
 	wantMsg         string
 	wantErrContains string
-}
-
-var parseFirstCodeLineTests = []parseFirstCodeLineTest{
-	{
-		"123 test",
-		123,
-		false,
-		deltasmtp.NoEnhancedCode,
-		"test",
-		"",
-	},
-	{
-		"123-test",
-		123,
-		true,
-		deltasmtp.NoEnhancedCode,
-		"test",
-		"",
-	},
-	{
-		"123-1.2 test",
-		123,
-		true,
-		deltasmtp.NoEnhancedCode,
-		"1.2 test",
-		"",
-	},
-	{
-		// RFC 2034: the class must match the reply code and be 2, 4 or 5
-		"123-1.2.3 test",
-		123,
-		true,
-		deltasmtp.NoEnhancedCode,
-		"1.2.3 test",
-		"",
-	},
-	{
-		"523-5.2.3 test",
-		523,
-		true,
-		deltasmtp.EnhancedCode{5, 2, 3},
-		"test",
-		"",
-	},
-	{
-		// RFC 3463: subject and detail have up to 3 digits
-		"550-5.7.26 test",
-		550,
-		true,
-		deltasmtp.EnhancedCode{5, 7, 26},
-		"test",
-		"",
-	},
-	{
-		"451 4.123.999 test",
-		451,
-		false,
-		deltasmtp.EnhancedCode{4, 123, 999},
-		"test",
-		"",
-	},
-	{
-		"550 4.7.1 class mismatch",
-		550,
-		false,
-		deltasmtp.NoEnhancedCode,
-		"4.7.1 class mismatch",
-		"",
-	},
-	{
-		"550 5.1234.1 too many digits",
-		550,
-		false,
-		deltasmtp.NoEnhancedCode,
-		"5.1234.1 too many digits",
-		"",
-	},
-	{
-		"550 5.07.1 leading zero",
-		550,
-		false,
-		deltasmtp.NoEnhancedCode,
-		"5.07.1 leading zero",
-		"",
-	},
-	{
-		"550 5.+7.1 sign",
-		550,
-		false,
-		deltasmtp.NoEnhancedCode,
-		"5.+7.1 sign",
-		"",
-	},
-	{
-		"550 55.7.1 class with two digits",
-		550,
-		false,
-		deltasmtp.NoEnhancedCode,
-		"55.7.1 class with two digits",
-		"",
-	},
-	{
-		"323-1.2.3 test",
-		323,
-		true,
-		deltasmtp.NoEnhancedCode,
-		"1.2.3 test",
-		"",
-	},
+}{
+	{"123 test", 123, false, deltasmtp.NoEnhancedCode, "test", ""},
+	{"123-test", 123, true, deltasmtp.NoEnhancedCode, "test", ""},
+	{"123-1.2 test", 123, true, deltasmtp.NoEnhancedCode, "1.2 test", ""},
+	// RFC 2034: the class must match the reply code and be 2, 4 or 5
+	{"123-1.2.3 test", 123, true, deltasmtp.NoEnhancedCode, "1.2.3 test", ""},
+	{"523-5.2.3 test", 523, true, deltasmtp.EnhancedCode{5, 2, 3}, "test", ""},
+	// RFC 3463: subject and detail have up to 3 digits
+	{"550-5.7.26 test", 550, true, deltasmtp.EnhancedCode{5, 7, 26}, "test", ""},
+	{"451 4.123.999 test", 451, false, deltasmtp.EnhancedCode{4, 123, 999}, "test", ""},
+	{"550 4.7.1 class mismatch", 550, false, deltasmtp.NoEnhancedCode, "4.7.1 class mismatch", ""},
+	{"550 5.1234.1 too many digits", 550, false, deltasmtp.NoEnhancedCode, "5.1234.1 too many digits", ""},
+	{"550 5.07.1 leading zero", 550, false, deltasmtp.NoEnhancedCode, "5.07.1 leading zero", ""},
+	{"550 5.+7.1 sign", 550, false, deltasmtp.NoEnhancedCode, "5.+7.1 sign", ""},
+	{"550 55.7.1 class with two digits", 550, false, deltasmtp.NoEnhancedCode, "55.7.1 class with two digits", ""},
+	{"323-1.2.3 test", 323, true, deltasmtp.NoEnhancedCode, "1.2.3 test", ""},
 }
 
 func TestParseFirstCodeLine(t *testing.T) {
@@ -167,57 +70,20 @@ func TestParseFirstCodeLine(t *testing.T) {
 	}
 }
 
-type parseExtraCodeLineTest struct {
+var parseExtraCodeLineTests = []struct {
 	line             string
 	codeString       string
 	enhancedCodePart []byte
 	wantContinued    bool
 	wantMsg          string
 	wantErrContains  string
-}
-
-var parseExtraCodeLineTests = []parseExtraCodeLineTest{
-	{
-		"123-1.1.0 test",
-		"123",
-		[]byte("1.1.0 "),
-		true,
-		"test",
-		"",
-	},
-	{
-		"123 1.2.0 test",
-		"123",
-		[]byte("1.2.0 "),
-		false,
-		"test",
-		"",
-	},
-	{
-		"123 test",
-		"123",
-		nil,
-		false,
-		"test",
-		"",
-	},
-	{
-		"550-5.7.26 test",
-		"550",
-		deltasmtp.EnhancedCode{5, 7, 26}.ToPart(),
-		true,
-		"test",
-		"",
-	},
-	{
-		// RFC 2034: the same enhanced code on every line
-		"550 5.7.2 test",
-		"550",
-		deltasmtp.EnhancedCode{5, 7, 26}.ToPart(),
-		false,
-		"",
-		"invalid response",
-	},
+}{
+	{"123-1.1.0 test", "123", []byte("1.1.0 "), true, "test", ""},
+	{"123 1.2.0 test", "123", []byte("1.2.0 "), false, "test", ""},
+	{"123 test", "123", nil, false, "test", ""},
+	{"550-5.7.26 test", "550", deltasmtp.EnhancedCode{5, 7, 26}.ToPart(), true, "test", ""},
+	// RFC 2034: the same enhanced code on every line
+	{"550 5.7.2 test", "550", deltasmtp.EnhancedCode{5, 7, 26}.ToPart(), false, "", "invalid response"},
 }
 
 func TestParseExtraCodeLine(t *testing.T) {
@@ -235,40 +101,15 @@ func TestParseExtraCodeLine(t *testing.T) {
 	}
 }
 
-type readResponseTest struct {
+var readResponseTests = []struct {
 	in       string
 	wantCode int
 	wantMsg  string
-}
-
-var readResponseTests = []readResponseTest{
-	/*
-		 	// invalid by RFC 5321
-			{
-				"230-Anonymous access granted, restrictions apply\n" +
-					"Read the file README.txt,\n" +
-					"230  please",
-				230,
-				"Anonymous access granted, restrictions apply\nRead the file README.txt,\n please",
-			},
-	*/
-	{
-		"230 Anonymous access granted, restrictions apply\n",
-		230,
-		"Anonymous access granted, restrictions apply",
-	},
-
-	{
-		"400-A\n400-B\n400 C",
-		400,
-		"A\nB\nC",
-	},
-
-	{
-		"400-A\r\n400-B\r\n400 C\r\n",
-		400,
-		"A\nB\nC",
-	},
+}{
+	// "230-...\nRead the file README.txt,\n230  please" is invalid by RFC 5321
+	{"230 Anonymous access granted, restrictions apply\n", 230, "Anonymous access granted, restrictions apply"},
+	{"400-A\n400-B\n400 C", 400, "A\nB\nC"},
+	{"400-A\r\n400-B\r\n400 C\r\n", 400, "A\nB\nC"},
 }
 
 // See https://www.ietf.org/rfc/rfc959.txt page 36.
@@ -276,16 +117,9 @@ func TestRFC959Lines(t *testing.T) {
 	for i, tt := range readResponseTests {
 		r := reader(tt.in+"\nFOLLOWING DATA", &bytes.Buffer{})
 		status, err := r.ReadResponse()
-		if err != nil {
-			t.Errorf("#%d: ReadResponse: %v", i, err)
-			continue
-		}
-		if status.Code != tt.wantCode {
-			t.Errorf("#%d: code=%d, want %d", i, status.Code, tt.wantCode)
-		}
-		if strings.Join(status.Lines, "\n") != tt.wantMsg {
-			t.Errorf("#%d: msg=%q, want %q", i, strings.Join(status.Lines, "\n"), tt.wantMsg)
-		}
+		require.NoError(t, err, i)
+		require.Equal(t, tt.wantCode, status.Code, i)
+		require.Equal(t, tt.wantMsg, strings.Join(status.Lines, "\n"), i)
 	}
 }
 
@@ -297,12 +131,7 @@ func TestReadMultiLineError(t *testing.T) {
 		"Unexpected but legal text!\n"+
 		"550 5.1.1 https://support.google.com/mail/answer/6596 h20si25154304pfd.166 - gsmtp\n", &bytes.Buffer{})
 
-	err := r.ReadResponseValid(250)
-	if err == nil {
-		t.Error("ReadResponse: no error, want error")
-	}
-
-	require.ErrorContains(t, err, "invalid response")
+	require.ErrorContains(t, r.ReadResponseValid(250), "invalid response")
 }
 
 // Test that multi-line errors are appropriately and fully read.
@@ -318,10 +147,7 @@ func TestReadMultiLine(t *testing.T) {
 		"https://support.google.com/mail/answer/6596 h20si25154304pfd.166 - gsmtp"
 
 	err := r.ReadResponseValid(250)
-	if err == nil {
-		t.Error("ReadResponse: no error, want error")
-	}
-
+	require.Error(t, err)
 	status, ok := err.(*deltasmtp.Status)
 	require.True(t, ok)
 
@@ -409,9 +235,7 @@ func TestReadResponseValidNoAllocs(t *testing.T) {
 	r := NewReceiver(strings.NewReader(strings.Repeat("250 2.1.5 OK\r\n", runs+1)), 4096, 0, 0)
 
 	allocs := testing.AllocsPerRun(runs, func() {
-		if err := r.ReadResponseValid(250); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, r.ReadResponseValid(250))
 	})
 	require.Zero(t, allocs)
 }

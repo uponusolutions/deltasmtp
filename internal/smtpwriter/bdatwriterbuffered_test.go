@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"errors"
 	"io"
-	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -17,38 +16,26 @@ func TestBdatWriterReaderFrom(t *testing.T) {
 	var buf bytes.Buffer
 	d := smtpwriter.NewBdatWriterBuffered(bufio.NewWriter(&buf), func() error { return nil }, 0, make([]byte, 1048576*2))
 
-	in := []byte("ab")
-
-	n, err := io.Copy(d, tester.NewBuffer(in))
-	if n != int64(len(in)) || err != nil {
-		t.Fatalf("Write: %d, %s", n, err)
-	}
+	n, err := io.Copy(d, tester.NewBuffer([]byte("ab")))
+	require.NoError(t, err)
+	require.Equal(t, int64(2), n)
 	require.NoError(t, d.Close())
 
 	// it's buffered, so he always knows when the last chunk is send
-	want := "BDAT 2 LAST\r\n" + string(in)
-	if s := buf.String(); s != want {
-		t.Fatalf("wrote %q", s)
-	}
+	require.Equal(t, "BDAT 2 LAST\r\nab", buf.String())
 }
 
 func TestBdatWriterReaderFromExact(t *testing.T) {
 	var buf bytes.Buffer
 	d := smtpwriter.NewBdatWriterBuffered(bufio.NewWriter(&buf), func() error { return nil }, 0, make([]byte, 2))
 
-	in := []byte("ab")
-
-	n, err := io.Copy(d, tester.NewBuffer(in))
-	if n != int64(len(in)) || err != nil {
-		t.Fatalf("Write: %d, %s", n, err)
-	}
+	n, err := io.Copy(d, tester.NewBuffer([]byte("ab")))
+	require.NoError(t, err)
+	require.Equal(t, int64(2), n)
 	require.NoError(t, d.Close())
 
 	// it's buffered but size matched exactly, empty last expected
-	want := "BDAT 2\r\n" + string(in) + "BDAT 0 LAST\r\n"
-	if s := buf.String(); s != want {
-		t.Fatalf("wrote %q", s)
-	}
+	require.Equal(t, "BDAT 2\r\nabBDAT 0 LAST\r\n", buf.String())
 }
 
 func TestBdatWriterBuffered(t *testing.T) {
@@ -56,48 +43,22 @@ func TestBdatWriterBuffered(t *testing.T) {
 		var buf bytes.Buffer
 		d := smtpwriter.NewBdatWriterBuffered(bufio.NewWriter(&buf), func() error { return nil }, 0, make([]byte, 1048576*2))
 
-		input1 := []byte("a")
-		n, err := d.Write(input1)
-		if n != len(input1) || err != nil {
-			t.Fatalf("Write: %d, %s", n, err)
-		}
-
-		input2 := []byte("b")
-		n, err = d.Write(input2)
-		if n != len(input2) || err != nil {
-			t.Fatalf("Write: %d, %s", n, err)
-		}
+		writeChunks(t, d, "a", "b")
 		require.NoError(t, d.Close())
 
 		// it's buffered, so he always knows when the last chunk is send
-		want := "BDAT " + strconv.Itoa(len(input1)+len(input2)) + " LAST\r\n" + string(input1) + string(input2)
-		if s := buf.String(); s != want {
-			t.Fatalf("wrote %q", s)
-		}
+		require.Equal(t, "BDAT 2 LAST\r\nab", buf.String())
 	})
 
 	t.Run("SmallBuffer", func(t *testing.T) {
 		var buf bytes.Buffer
 		d := smtpwriter.NewBdatWriterBuffered(bufio.NewWriter(&buf), func() error { return nil }, 0, make([]byte, 1))
 
-		input1 := []byte("ab")
-		n, err := d.Write(input1)
-		if n != len(input1) || err != nil {
-			t.Fatalf("Write: %d, %s", n, err)
-		}
-
-		input2 := []byte("cd")
-		n, err = d.Write(input2)
-		if n != len(input2) || err != nil {
-			t.Fatalf("Write: %d, %s", n, err)
-		}
+		writeChunks(t, d, "ab", "cd")
 		require.NoError(t, d.Close())
 
 		// writes larger than the empty buffer are passed through as own chunks
-		want := "BDAT 2\r\nabBDAT 2\r\ncdBDAT 0 LAST\r\n"
-		if s := buf.String(); s != want {
-			t.Fatalf("wrote %q", s)
-		}
+		require.Equal(t, "BDAT 2\r\nabBDAT 2\r\ncdBDAT 0 LAST\r\n", buf.String())
 	})
 
 	t.Run("WithError", func(t *testing.T) {
@@ -105,15 +66,12 @@ func TestBdatWriterBuffered(t *testing.T) {
 
 		// read is never called as buffer lead to a single bdat
 		d := smtpwriter.NewBdatWriterBuffered(bufio.NewWriter(&buf), func() error { return errors.New("failed") }, 0, make([]byte, 1048576*2))
-		n, err := d.Write([]byte("ab"))
-		require.Equal(t, 2, n)
-		require.NoError(t, err)
-		err = d.Close()
-		require.NoError(t, err)
+		writeChunks(t, d, "ab")
+		require.NoError(t, d.Close())
 
 		// passed through write, the response of the chunk is read and fails
 		d = smtpwriter.NewBdatWriterBuffered(bufio.NewWriter(&buf), func() error { return errors.New("failed") }, 0, make([]byte, 1))
-		n, err = d.Write([]byte("ab"))
+		n, err := d.Write([]byte("ab"))
 		require.Equal(t, 2, n)
 		require.ErrorContains(t, err, "failed")
 	})
@@ -122,63 +80,27 @@ func TestBdatWriterBuffered(t *testing.T) {
 		var buf bytes.Buffer
 		d := smtpwriter.NewBdatWriterBuffered(bufio.NewWriter(&buf), func() error { return nil }, 2, make([]byte, 1048576*2))
 
-		input1 := []byte("a")
-		n, err := d.Write(input1)
-		if n != len(input1) || err != nil {
-			t.Fatalf("Write: %d, %s", n, err)
-		}
-
-		input2 := []byte("b")
-		n, err = d.Write(input2)
-		if n != len(input2) || err != nil {
-			t.Fatalf("Write: %d, %s", n, err)
-		}
+		writeChunks(t, d, "a", "b")
 		require.NoError(t, d.Close())
-
-		want := "BDAT " + strconv.Itoa(len(input1)+len(input2)) + " LAST\r\n" + string(input1) + string(input2)
-		if s := buf.String(); s != want {
-			t.Fatalf("wrote %q", s)
-		}
+		require.Equal(t, "BDAT 2 LAST\r\nab", buf.String())
 	})
 
 	t.Run("WithSizeErrorTooMuch", func(t *testing.T) {
 		var buf bytes.Buffer
 		d := smtpwriter.NewBdatWriterBuffered(bufio.NewWriter(&buf), func() error { return nil }, 1, make([]byte, 1048576*2))
 
-		input1 := []byte("a")
-		n, err := d.Write(input1)
-		if n != len(input1) || err != nil {
-			t.Fatalf("Write: %d, %s", n, err)
-		}
-
-		input2 := []byte("b")
-		_, err = d.Write(input2)
+		writeChunks(t, d, "a")
+		_, err := d.Write([]byte("b"))
 		require.NoError(t, err)
 		require.ErrorContains(t, d.Close(), "got more bytes")
 	})
 
 	t.Run("WithSizeErrorTooLess", func(t *testing.T) {
-		size := 3
-
 		var buf bytes.Buffer
-		d := smtpwriter.NewBdatWriterBuffered(bufio.NewWriter(&buf), func() error { return nil }, size, make([]byte, 1048576*2))
-
-		input1 := []byte("a")
-		n, err := d.Write(input1)
-
-		require.NoError(t, err)
-		require.Equal(t, len(input1), n)
-
-		input2 := []byte("b")
-		n, err = d.Write(input2)
-
-		require.NoError(t, err)
-		require.Equal(t, len(input2), n)
-
+		d := smtpwriter.NewBdatWriterBuffered(bufio.NewWriter(&buf), func() error { return nil }, 3, make([]byte, 1048576*2))
+		writeChunks(t, d, "a", "b")
 		require.NoError(t, d.Close())
-
-		want := "BDAT " + strconv.Itoa(size) + " LAST\r\n" + string(input1) + string(input2) + "\x00"
-		require.Equal(t, want, buf.String())
+		require.Equal(t, "BDAT 3 LAST\r\nab\x00", buf.String())
 	})
 }
 
@@ -205,11 +127,7 @@ func TestBdatWriterBufferedSmallWritesAfterFlush(t *testing.T) {
 	var buf bytes.Buffer
 	d := smtpwriter.NewBdatWriterBuffered(bufio.NewWriter(&buf), func() error { return nil }, 0, make([]byte, 2))
 
-	for _, s := range []string{"a", "b", "c", "d", "e"} {
-		n, err := d.Write([]byte(s))
-		require.NoError(t, err)
-		require.Equal(t, 1, n)
-	}
+	writeChunks(t, d, "a", "b", "c", "d", "e")
 	require.NoError(t, d.Close())
 
 	require.Equal(t, "BDAT 2\r\nabBDAT 2\r\ncdBDAT 1 LAST\r\ne", buf.String())
@@ -231,11 +149,9 @@ func TestBdatWriterBufferedFlushError(t *testing.T) {
 	var buf bytes.Buffer
 	d := smtpwriter.NewBdatWriterBuffered(bufio.NewWriter(&buf), read, 0, make([]byte, 2))
 
-	n, err := d.Write([]byte("ab"))
-	require.NoError(t, err)
-	require.Equal(t, 2, n)
+	writeChunks(t, d, "ab")
 
-	n, err = d.Write([]byte("c"))
+	n, err := d.Write([]byte("c"))
 	require.ErrorIs(t, err, errRejected)
 	require.Equal(t, 0, n)
 }

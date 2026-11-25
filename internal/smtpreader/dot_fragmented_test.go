@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"github.com/uponusolutions/deltasmtp"
 	"github.com/uponusolutions/deltasmtp/internal/smtpreader"
 )
@@ -61,14 +62,12 @@ func TestDataReaderFragmented(t *testing.T) {
 					var got bytes.Buffer
 					buffer := make([]byte, output)
 					_, err := io.CopyBuffer(&writeOnlyBuffer{&got}, r, buffer)
-					if err != tc.err || got.String() != tc.want {
-						t.Fatalf("got %q, %v; want %q, %v", got.String(), err, tc.want, tc.err)
-					}
+					require.Equal(t, tc.err, err)
+					require.Equal(t, tc.want, got.String())
 					if tc.err == nil {
 						remaining, err := io.ReadAll(buffered)
-						if err != nil || string(remaining) != "NEXT\r\n" {
-							t.Fatalf("read beyond DATA: %q, %v", remaining, err)
-						}
+						require.NoError(t, err)
+						require.Equal(t, "NEXT\r\n", string(remaining), "read beyond DATA")
 					}
 				})
 			}
@@ -84,8 +83,7 @@ func TestDataReaderBulkLimit(t *testing.T) {
 	for _, limit := range []int64{1, 63, 4095, 4096, 4097} {
 		r := smtpreader.NewDot(bufio.NewReader(strings.NewReader(strings.Repeat("a", 8192)+"\r\n.\r\n")), limit)
 		data, err := io.ReadAll(r)
-		if err != deltasmtp.ErrDataTooLarge || int64(len(data)) != limit {
-			t.Fatalf("limit %d: read %d, %v", limit, len(data), err)
-		}
+		require.Equal(t, deltasmtp.ErrDataTooLarge, err, limit)
+		require.Len(t, data, int(limit))
 	}
 }

@@ -40,16 +40,12 @@ func TestServerBuffersReused(t *testing.T) {
 		require.NoError(t, c.SetDeadline(time.Now().Add(5*time.Second)))
 		scanner := bufio.NewScanner(c)
 
-		scanOk(t, c, scanner)
-		require.Equal(t, "220 localhost ESMTP Service Ready", scanner.Text())
-		_, _ = io.WriteString(c, "NOOP\r\n")
-		scanOk(t, c, scanner)
-		require.True(t, strings.HasPrefix(scanner.Text(), "250 "), scanner.Text())
+		require.Equal(t, "220 localhost ESMTP Service Ready", readReply(t, c, scanner))
+		expect(t, c, scanner, "NOOP", "250 ")
 
 		// The too long line closes the connection, the NOOP after it stays unread.
 		_, _ = io.WriteString(c, strings.Repeat("A", 200)+"\r\nNOOP\r\n")
-		scanOk(t, c, scanner)
-		require.True(t, strings.HasPrefix(scanner.Text(), "500 "), scanner.Text())
+		requirePrefix(t, readReply(t, c, scanner), "500 ")
 		require.False(t, scanner.Scan(), "connection must be closed")
 		_ = c.Close()
 	}
