@@ -8,7 +8,9 @@ import (
 	"github.com/uponusolutions/deltasmtp"
 )
 
-type dot struct {
+// Dot reads a dot-encoded message (RFC 5321 section 4.5.2) up to the end of
+// data line. The zero value is unusable, it is set up by NewDot or Reset.
+type Dot struct {
 	r       *bufio.Reader
 	state   int
 	limited bool
@@ -17,16 +19,20 @@ type dot struct {
 
 // NewDot creates a new dot reader.
 func NewDot(reader *bufio.Reader, maxMessageBytes int64) io.Reader {
-	dr := &dot{
-		r: reader,
-	}
+	dr := &Dot{}
+	dr.Reset(reader, maxMessageBytes)
+	return dr
+}
+
+// Reset sets r up to read a new message like a Dot of NewDot. It lets a
+// connection reuse its reader for every message.
+func (r *Dot) Reset(reader *bufio.Reader, maxMessageBytes int64) {
+	*r = Dot{r: reader}
 
 	if maxMessageBytes > 0 {
-		dr.limited = true
-		dr.n = maxMessageBytes
+		r.limited = true
+		r.n = maxMessageBytes
 	}
-
-	return dr
 }
 
 const (
@@ -41,7 +47,7 @@ const (
 // elide leading dots and detect End-of-Data
 // (<CR><LF>.<CR><LF>) line.
 // nolint:revive
-func (r *dot) Read(b []byte) (int, error) {
+func (r *Dot) Read(b []byte) (int, error) {
 	if r.state == stateEOF {
 		return 0, io.EOF
 	}
@@ -170,7 +176,7 @@ func (r *dot) Read(b []byte) (int, error) {
 	return r.finalize(n, skipped, err)
 }
 
-func (r *dot) finalize(n int, skipped int, err error) (int, error) {
+func (r *Dot) finalize(n int, skipped int, err error) (int, error) {
 	// n + skipped is always smaller then what was peeked,
 	// so it is guaranteed to work
 	_, _ = r.r.Discard(n + skipped)
@@ -193,7 +199,7 @@ func (r *dot) finalize(n int, skipped int, err error) (int, error) {
 	return n, err
 }
 
-func (r *dot) peek(blen int) ([]byte, error) {
+func (r *Dot) peek(blen int) ([]byte, error) {
 	minimumPeek := 5
 	if r.state == stateBegin {
 		minimumPeek = 3

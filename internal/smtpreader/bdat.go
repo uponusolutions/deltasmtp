@@ -8,13 +8,14 @@ import (
 	"github.com/uponusolutions/deltasmtp"
 )
 
-type bdat struct {
-	size            int64
+// Bdat reads a message sent in BDAT chunks (RFC 3030). The zero value is
+// unusable, it is set up by NewBdat or Reset.
+type Bdat struct {
+	size            int64 // bytes left in the current chunk
 	last            bool
 	bytesReceived   int64
 	maxMessageBytes int64
 	input           io.Reader
-	chunk           io.Reader
 	nextCommand     func() (string, string, error)
 }
 
@@ -54,23 +55,28 @@ func BdatArg(arg string) (int64, bool, error) {
 
 // NewBdat creates a new bdat reader.
 func NewBdat(size int64, last bool, maxMessageBytes int64, input io.Reader, nextCommand func() (string, string, error)) io.Reader {
-	return &bdat{
+	d := &Bdat{}
+	d.Reset(size, last, maxMessageBytes, input, nextCommand)
+	return d
+}
+
+// Reset sets d up to read a new message like a Bdat of NewBdat. It lets a
+// connection reuse its reader for every message.
+func (d *Bdat) Reset(size int64, last bool, maxMessageBytes int64, input io.Reader, nextCommand func() (string, string, error)) {
+	*d = Bdat{
 		maxMessageBytes: maxMessageBytes,
 		size:            size,
 		last:            last,
-		bytesReceived:   0,
 		input:           input,
 		nextCommand:     nextCommand,
 	}
 }
 
-func (d *bdat) Read(b []byte) (int, error) {
+func (d *Bdat) Read(b []byte) (int, error) {
 	if d.size == 0 {
 		if d.last {
 			return 0, io.EOF
 		}
-
-		d.chunk = nil
 
 		cmd, arg, err := d.nextCommand()
 		if err != nil {
@@ -103,11 +109,12 @@ func (d *bdat) Read(b []byte) (int, error) {
 		return 0, deltasmtp.ErrDataTooLarge
 	}
 
-	if d.chunk == nil {
-		d.chunk = io.LimitReader(d.input, int64(d.size))
+	// Never read beyond the chunk, without an io.LimitReader per chunk.
+	if int64(len(b)) > d.size {
+		b = b[:d.size]
 	}
 
-	n, err := d.chunk.Read(b)
+	n, err := d.input.Read(b)
 	d.bytesReceived += int64(n)
 	d.size -= int64(n)
 

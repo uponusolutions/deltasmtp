@@ -19,16 +19,24 @@ var (
 // every write is sent as its own chunk.
 // The caller should close the BdatWriter before the next call to a method on w.
 func NewBdat(writer *bufio.Writer, read func() error, size int) io.WriteCloser {
-	return &bdat{
-		w:                  writer,
-		read:               read,
-		remainingSize:      size,
-		knownSize:          size > 0,
-		remainingChunkSize: 0,
+	d := &Bdat{}
+	d.Reset(writer, read, size)
+	return d
+}
+
+// Reset sets d up to write a new message like a Bdat of NewBdat. It lets a
+// connection reuse its writer for every message.
+func (d *Bdat) Reset(writer *bufio.Writer, read func() error, size int) {
+	*d = Bdat{
+		w:             writer,
+		read:          read,
+		remainingSize: size,
+		knownSize:     size > 0,
 	}
 }
 
-type bdat struct {
+// Bdat writes a message as BDAT chunks, see NewBdat.
+type Bdat struct {
 	w    *bufio.Writer
 	read func() error
 	// size still expected to be written
@@ -43,7 +51,7 @@ type bdat struct {
 }
 
 // Write writes bytes as bdat chunk, or as part of the single chunk if the size is known.
-func (d *bdat) Write(b []byte) (n int, err error) {
+func (d *Bdat) Write(b []byte) (n int, err error) {
 	d.started = true
 
 	var p int
@@ -73,7 +81,7 @@ func (d *bdat) Write(b []byte) (n int, err error) {
 }
 
 // write writes b until everything is written
-func (d *bdat) write(b []byte) (n int, err error) {
+func (d *Bdat) write(b []byte) (n int, err error) {
 	var p int
 	for n < len(b) {
 		p, err = d.w.Write(b[n:])
@@ -94,7 +102,7 @@ func (d *bdat) write(b []byte) (n int, err error) {
 
 // writeBdat writes b as bdat command and checks return
 // if size is known a single chunk with the remaining size is started
-func (d *bdat) writeBdat(b []byte, last bool) (n int, err error) {
+func (d *Bdat) writeBdat(b []byte, last bool) (n int, err error) {
 	if d.remainingChunkSize == 0 {
 		size := len(b)
 		if d.knownSize {
@@ -132,7 +140,7 @@ func (d *bdat) writeBdat(b []byte, last bool) (n int, err error) {
 }
 
 // write BDAT <SIZE> \r\n
-func (d *bdat) bdat(size int, last bool) (err error) {
+func (d *Bdat) bdat(size int, last bool) (err error) {
 	if _, err = d.w.Write(prefix); err != nil {
 		return err
 	}
@@ -155,7 +163,9 @@ func (d *bdat) bdat(size int, last bool) (err error) {
 	return nil
 }
 
-func (d *bdat) Close() error {
+// Close finishes the message: a short message is padded with zero bytes to the
+// announced size, and BDAT 0 LAST is sent if no chunk was marked as last.
+func (d *Bdat) Close() error {
 	// The close came to early, more bytes expected
 	if d.knownSize && d.remainingSize > 0 {
 		if _, err := d.Write(make([]byte, d.remainingSize)); err != nil {

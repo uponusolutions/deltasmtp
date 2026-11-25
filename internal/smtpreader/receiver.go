@@ -2,10 +2,11 @@ package smtpreader
 
 import (
 	"bufio"
-	"errors"
+	"bytes"
 	"fmt"
 	"io"
 	"net/textproto"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -53,7 +54,7 @@ func (t *Receiver) Reset(conn io.Reader) {
 // ReadFullLine reads a single line from r,
 // eliding the final \n or \r\n from the returned string.
 func (t *Receiver) ReadFullLine() (string, error) {
-	line, err := t.readLineSlice()
+	line, err := t.ReadFullLineBytes()
 	return string(line), err
 }
 
@@ -92,7 +93,7 @@ func (t *Receiver) ReadResponse() (*deltasmtp.Status, error) {
 // ReadResponseValid returns an error if the code does not match expectation.
 // An expected single line reply, the common case, is checked without allocating.
 func (t *Receiver) ReadResponseValid(expectCode int) error {
-	line, err := t.readLineSlice()
+	line, err := t.ReadFullLineBytes()
 	if err != nil {
 		return err
 	}
@@ -126,6 +127,17 @@ func (t *Receiver) readResponseExtra(status *deltasmtp.Status, continued bool, a
 
 	var message string
 	var err error
+
+	if appendMessage {
+		// A reply usually arrives at once, the lines already buffered tell how
+		// many to expect instead of growing the slice line by line.
+		buffered, _ := t.Peek(t.Buffered())
+		n := bytes.Count(buffered, []byte("\n"))
+		if t.maxResponseLines > 0 {
+			n = min(n, t.maxResponseLines)
+		}
+		status.Lines = slices.Grow(status.Lines, n)
+	}
 
 	codeString := strconv.Itoa(status.Code)
 	encCodePart := status.EnhancedCode.ToPart()
@@ -172,8 +184,8 @@ func parseFirstCodeLine(line string) (*deltasmtp.Status, bool, error) {
 	if !ok {
 		return deltasmtp.NewStatusS(code, deltasmtp.NoEnhancedCode, message), continued, nil
 	}
-	enhCode, err := parseEnhancedCode(enhPart, code)
-	if err != nil {
+	enhCode, ok := parseEnhancedCode(enhPart, code)
+	if !ok {
 		return deltasmtp.NewStatusS(code, deltasmtp.NoEnhancedCode, message), continued, nil
 	}
 
@@ -206,13 +218,13 @@ func parseExtraCodeLine(line string, codeString string, enhCodePart []byte) (boo
 //	subject     = 1*3digit          ; without leading zeros
 //	detail      = 1*3digit          ; without leading zeros
 //
-// Anything else isn't an enhanced code, but the start of the reply text.
-func parseEnhancedCode(s string, replyCode int) (deltasmtp.EnhancedCode, error) {
+// Anything else isn't an enhanced code, but the start of the reply text, ok is
+// false then. That is common (e.g. the greeting), so no error is built for it.
+func parseEnhancedCode(s string, replyCode int) (code deltasmtp.EnhancedCode, ok bool) {
 	if strings.Count(s, ".") != 2 {
-		return deltasmtp.NoEnhancedCode, errors.New("wrong amount of enhanced code parts")
+		return deltasmtp.NoEnhancedCode, false
 	}
 
-	code := deltasmtp.NoEnhancedCode
 	for i := range code {
 		var part string
 		part, s, _ = strings.Cut(s, ".")
@@ -222,15 +234,15 @@ func parseEnhancedCode(s string, replyCode int) (deltasmtp.EnhancedCode, error) 
 		}
 		if len(part) == 0 || len(part) > maxDigits || len(part) > 1 && part[0] == '0' ||
 			strings.IndexFunc(part, func(r rune) bool { return r < '0' || r > '9' }) != -1 {
-			return deltasmtp.NoEnhancedCode, fmt.Errorf("invalid enhanced code part %q", part)
+			return deltasmtp.NoEnhancedCode, false
 		}
 		code[i], _ = strconv.Atoi(part)
 	}
 
 	if code[0] != replyCode/100 || code[0] != 2 && code[0] != 4 && code[0] != 5 {
-		return deltasmtp.NoEnhancedCode, fmt.Errorf("enhanced code class %d doesn't match reply code %d", code[0], replyCode)
+		return deltasmtp.NoEnhancedCode, false
 	}
-	return code, nil
+	return code, true
 }
 
 // parseCode returns the reply code at the start of line, three digits from 100
@@ -260,7 +272,9 @@ func IsCodeUnexpected(code int, expectCode int) bool {
 		100 <= expectCode && expectCode < 1000 && code != expectCode
 }
 
-func (t *Receiver) readLineSlice() ([]byte, error) {
+// ReadFullLineBytes is ReadFullLine without the conversion to a string. The
+// returned bytes are only valid until the next read.
+func (t *Receiver) ReadFullLineBytes() ([]byte, error) {
 	// If the line limit was exceeded once, the connection shouldn't be used anymore.
 	if t.lineLengthExceeded {
 		return nil, deltasmtp.ErrTooLongLine

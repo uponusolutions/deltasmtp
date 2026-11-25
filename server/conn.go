@@ -60,6 +60,24 @@ type Conn struct {
 	tx      transaction // current mail transaction
 
 	transactions int // MAIL commands in this session (RFC 9422 MAILMAX)
+
+	data     messageReader // reads the message of DATA or BDAT
+	bdatLine string        // the last BDAT command line, see commandLine
+}
+
+// messageReader holds the readers of the message content. They are reused for
+// every message of a session, so receiving a message doesn't allocate them.
+type messageReader struct {
+	dot     smtpreader.Dot
+	bdat    smtpreader.Bdat
+	isBdat  bool // open returns bdat instead of dot
+	started bool // DATA: the 354 reply was sent and dot is set up
+	closed  bool // BDAT: the transfer failed, no further chunk is read
+
+	// Bound to the Conn by bindMessageFuncs, the same funcs serve every
+	// message of the session instead of new closures for each.
+	open        func() io.Reader               // passed to Session.Data
+	nextCommand func() (string, string, error) // reads the next BDAT command
 }
 
 // clientState holds what the server knows about the client. It is discarded
@@ -119,11 +137,39 @@ func (c *Conn) run() (err error) {
 // nextCommand reads the next line and parses it.
 // The command is always returned upper case.
 func (c *Conn) nextCommand() (cmd string, arg string, err error) {
-	line, err := c.readLine()
+	b, err := c.receiver.ReadFullLineBytes()
 	if err != nil {
 		return "", "", err
 	}
+	line := c.commandLine(b)
+	c.logger().LogAttrs(c.ctx, slog.LevelDebug, "read", slog.String("line", line))
 	return parse.Cmd(line)
+}
+
+// commandLine returns the command line b as a string. A string is only
+// allocated for a line it hasn't returned just before: the commands without
+// arguments are constants, and the BDAT line of every full chunk of a message
+// is the same (comparing string(b) doesn't allocate). Other lines aren't kept,
+// e.g. an AUTH line with credentials.
+func (c *Conn) commandLine(b []byte) string {
+	switch string(b) {
+	case "DATA":
+		return "DATA"
+	case "RSET":
+		return "RSET"
+	case "NOOP":
+		return "NOOP"
+	case "QUIT":
+		return "QUIT"
+	case c.bdatLine:
+		return c.bdatLine
+	}
+
+	line := string(b)
+	if len(line) > 5 && strings.EqualFold(line[:5], "BDAT ") {
+		c.bdatLine = line
+	}
+	return line
 }
 
 // Commands are dispatched to the appropriate handler functions.
@@ -398,84 +444,96 @@ func (c *Conn) handleGreet(esmtp bool, arg string) error {
 }
 
 func (c *Conn) handleGreetResponse() *deltasmtp.Status {
-	isTLS := c.IsTLS()
-
-	// 17 lines is the current maximum
-	lines := make([]string, 0, 17)
+	ext := c.server.extensions
+	lines := make([]string, 0, 3+len(ext.beforeTLS)+len(ext.afterAuth))
 
 	lines = append(lines, c.server.hostname+" greets "+c.client.helo)
-	lines = append(lines, "PIPELINING")
-	lines = append(lines, "8BITMIME")
-	lines = append(lines, "ENHANCEDSTATUSCODES")
-
-	if c.server.enableCHUNKING {
-		lines = append(lines, "CHUNKING")
-	}
-	if !isTLS && c.server.tlsConfig != nil {
+	lines = append(lines, ext.beforeTLS...)
+	if !c.IsTLS() && c.server.tlsConfig != nil {
 		lines = append(lines, "STARTTLS")
 	}
 	if len(c.client.mechanisms) > 0 {
 		lines = append(lines, "AUTH "+strings.Join(c.client.mechanisms, " "))
 	}
-	if c.server.enableSMTPUTF8 {
-		lines = append(lines, "SMTPUTF8")
+	lines = append(lines, ext.afterAuth...)
+
+	return deltasmtp.NewStatusM(250, deltasmtp.NoEnhancedCode, lines)
+}
+
+// extensions are the EHLO reply lines which only depend on the server options,
+// they are built once by New. STARTTLS and AUTH depend on the connection and
+// are put in between.
+type extensions struct {
+	beforeTLS []string
+	afterAuth []string
+}
+
+func newExtensions(s *Server) extensions {
+	before := []string{"PIPELINING", "8BITMIME", "ENHANCEDSTATUSCODES"}
+	if s.enableCHUNKING {
+		before = append(before, "CHUNKING")
+	}
+
+	var after []string
+	if s.enableSMTPUTF8 {
+		after = append(after, "SMTPUTF8")
 	}
 	// We explicit allow require tls to be set if the connection is unencrypted
 	// because if the server runs in a fully trusted zone
 	// then the encryption is only relevant when it leaves this zone.
-	if c.server.enableREQUIRETLS {
-		lines = append(lines, "REQUIRETLS")
+	if s.enableREQUIRETLS {
+		after = append(after, "REQUIRETLS")
 	}
-	if c.server.enableBINARYMIME {
-		lines = append(lines, "BINARYMIME")
+	if s.enableBINARYMIME {
+		after = append(after, "BINARYMIME")
 	}
-	if c.server.enableDSN {
-		lines = append(lines, "DSN")
+	if s.enableDSN {
+		after = append(after, "DSN")
 	}
-	if c.server.enableXOORG {
-		lines = append(lines, "XOORG")
+	if s.enableXOORG {
+		after = append(after, "XOORG")
 	}
-	if c.server.maxMessageBytes > 0 {
-		lines = append(lines, "SIZE "+strconv.FormatInt(c.server.maxMessageBytes, 10))
+	if s.maxMessageBytes > 0 {
+		after = append(after, "SIZE "+strconv.FormatInt(s.maxMessageBytes, 10))
 	} else {
-		lines = append(lines, "SIZE")
+		after = append(after, "SIZE")
 	}
-	if limits := c.limits(); limits != "" {
-		lines = append(lines, "LIMITS"+limits)
+	if limits := limits(s); limits != "" {
+		after = append(after, "LIMITS"+limits)
 	}
-	if c.server.enableRRVS {
-		lines = append(lines, "RRVS")
+	if s.enableRRVS {
+		after = append(after, "RRVS")
 	}
-	if c.server.enableDELIVERBY {
+	if s.enableDELIVERBY {
 		// maximum of nine digits
-		if c.server.minimumDeliverInSeconds > 0 && c.server.minimumDeliverInSeconds < 999999999 {
-			lines = append(lines, "DELIVERBY "+strconv.Itoa(c.server.minimumDeliverInSeconds))
+		if s.minimumDeliverInSeconds > 0 && s.minimumDeliverInSeconds < 999999999 {
+			after = append(after, "DELIVERBY "+strconv.Itoa(s.minimumDeliverInSeconds))
 		} else {
-			lines = append(lines, "DELIVERBY")
+			after = append(after, "DELIVERBY")
 		}
 	}
-	if c.server.enableMTPRIORITY {
-		if c.server.mtPriorityProfile != deltasmtp.PriorityUnspecified {
-			lines = append(lines, "MT-PRIORITY "+string(c.server.mtPriorityProfile))
+	if s.enableMTPRIORITY {
+		if s.mtPriorityProfile != deltasmtp.PriorityUnspecified {
+			after = append(after, "MT-PRIORITY "+string(s.mtPriorityProfile))
 		} else {
-			lines = append(lines, "MT-PRIORITY")
+			after = append(after, "MT-PRIORITY")
 		}
 	}
 
-	return deltasmtp.NewStatusM(250, deltasmtp.NoEnhancedCode, lines)
+	return extensions{beforeTLS: before, afterAuth: after}
 }
 
 // limits returns the RFC 9422 LIMITS parameters with a leading space, or ""
 // if there are none. Values are only valid from 1 to 999999, a larger limit
 // isn't advertised (but still enforced).
-func (c *Conn) limits() string {
+func limits(s *Server) string {
 	var sb strings.Builder
 	for _, l := range []struct {
 		prefix string
 		value  int
 	}{
-		{" MAILMAX=", c.server.maxTransactions},
-		{" RCPTMAX=", c.server.maxRecipients},
+		{" MAILMAX=", s.maxTransactions},
+		{" RCPTMAX=", s.maxRecipients},
 	} {
 		if l.value > 0 && l.value <= 999999 {
 			sb.WriteString(l.prefix)
@@ -566,7 +624,8 @@ func (c *Conn) handleMail(arg string) error {
 	if err != nil {
 		return c.newStatusError(deltasmtp.ErrMailSyntax, err)
 	}
-	args, err := parse.Args(p.S)
+	var argsBuf [8]parse.Arg
+	args, err := parse.Args(argsBuf[:0], p.S)
 	if err != nil {
 		return c.newStatusError(deltasmtp.ErrMailParams, err)
 	}
@@ -696,7 +755,8 @@ func (c *Conn) handleMail(arg string) error {
 	}
 
 	c.state = stateMail
-	return deltasmtp.NewStatusS(250, deltasmtp.EnhancedCode{2, 0, 0}, "Roger, accepting mail from <"+from+">")
+	c.writeOK("Roger, accepting mail from <", from, ">")
+	return nil
 }
 
 func handleMailBY(server *Server, opts *deltasmtp.MailOptions, value string) error {
@@ -778,7 +838,8 @@ func (c *Conn) handleRcpt(arg string) error {
 		)
 	}
 
-	args, err := parse.Args(p.S)
+	var argsBuf [8]parse.Arg
+	args, err := parse.Args(argsBuf[:0], p.S)
 	if err != nil {
 		return c.newStatusError(deltasmtp.ErrRcptParams, err)
 	}
@@ -816,8 +877,8 @@ func (c *Conn) handleRcpt(arg string) error {
 	}
 
 	c.tx.recipients++
-	return deltasmtp.NewStatusS(250, deltasmtp.EnhancedCode{2, 0, 0},
-		"I'll make sure <"+recipient+"> gets this")
+	c.writeOK("I'll make sure <", recipient, "> gets this")
+	return nil
 }
 
 func handleRcptNotify(server *Server, opts *deltasmtp.RcptOptions, value string) error {
@@ -867,7 +928,8 @@ func (c *Conn) handleVrfy(arg string) error {
 	if err != nil {
 		return deltasmtp.ErrVrfySyntax
 	}
-	args, err := parse.Args(p.S)
+	var argsBuf [8]parse.Arg
+	args, err := parse.Args(argsBuf[:0], p.S)
 	if err != nil {
 		return c.newStatusError(deltasmtp.ErrVrfyParams, err)
 	}
@@ -1031,22 +1093,11 @@ func (c *Conn) handleData(arg string) error {
 		return deltasmtp.ErrDataBINARYMIME
 	}
 
-	var r io.Reader
+	c.bindMessageFuncs()
+	c.data.isBdat = false
+	c.data.started = false
 
-	rstart := func() io.Reader {
-		if r != nil {
-			return r
-		}
-		// We have recipients, go to accept data
-		c.writeStatus(deltasmtp.StartMailInput)
-		c.setDataDeadline()
-
-		// r gets exposed to be able to discard the rest of the message
-		r = smtpreader.NewDot(c.receiver.Reader, c.server.maxMessageBytes)
-		return r
-	}
-
-	uuid, err := c.session.Data(c.ctx, rstart)
+	uuid, err := c.session.Data(c.ctx, c.data.open)
 
 	// an error which isn't a smtp status error will always terminate the connection
 	if _, ok := err.(*deltasmtp.Status); err != nil && !ok {
@@ -1057,14 +1108,14 @@ func (c *Conn) handleData(arg string) error {
 	// The reader keeps returning ErrDataTooLarge once the limit is hit, so this also
 	// detects a breach the backend swallowed. In that case the rest of the message is
 	// still on the wire and the connection can't be resynchronised.
-	if r != nil {
-		if _, discardErr := io.Copy(io.Discard, r); errors.Is(discardErr, deltasmtp.ErrDataTooLarge) {
+	if c.data.started {
+		if _, discardErr := io.Copy(io.Discard, &c.data.dot); errors.Is(discardErr, deltasmtp.ErrDataTooLarge) {
 			return errMessageTooLarge
 		}
 	}
 
 	// Without a 354 the client sent no message, a rejected DATA command leaves the transaction open.
-	if r == nil && err != nil {
+	if !c.data.started && err != nil {
 		return err
 	}
 
@@ -1124,22 +1175,12 @@ func (c *Conn) handleBdat(arg string) error {
 		return deltasmtp.ErrNoRecipients
 	}
 
-	closed := false
+	c.bindMessageFuncs()
+	c.data.isBdat = true
+	c.data.closed = false
+	c.data.bdat.Reset(size, last, c.server.maxMessageBytes, c.receiver, c.data.nextCommand)
 
-	data := smtpreader.NewBdat(size, last, c.server.maxMessageBytes, c.receiver, func() (string, string, error) {
-		// if bdat is closed (error occurred)
-		if closed {
-			return "", "", io.EOF
-		}
-		// the reply between chunks isn't limited by the data deadline
-		deadline.SetWrite(c.conn, c.server.commandTimeout)
-		c.writeStatus(deltasmtp.BDATContinue)
-		return c.nextCommand()
-	})
-
-	queueid, err := c.session.Data(c.ctx, func() io.Reader {
-		return data
-	})
+	queueid, err := c.session.Data(c.ctx, c.data.open)
 
 	smtpErr, isStatus := err.(*deltasmtp.Status)
 
@@ -1157,14 +1198,14 @@ func (c *Conn) handleBdat(arg string) error {
 		// SMTP has declared support for command pipelining [PIPE], the receiver
 		// SMTP MUST be prepared to accept and discard additional BDAT chunks
 		// already in the pipeline after the failed BDAT.
-		closed = true
+		c.data.closed = true
 	}
 
 	// Make sure all the data has been consumed, regardless of what the backend returned.
 	// The reader keeps returning ErrDataTooLarge once the limit is hit, so this also
 	// detects a breach the backend swallowed. In that case the chunk is still on the
 	// wire and the connection can't be resynchronised.
-	if _, discardErr := io.Copy(io.Discard, data); errors.Is(discardErr, deltasmtp.ErrDataTooLarge) {
+	if _, discardErr := io.Copy(io.Discard, &c.data.bdat); errors.Is(discardErr, deltasmtp.ErrDataTooLarge) {
 		return errMessageTooLarge
 	}
 
@@ -1180,6 +1221,45 @@ func (c *Conn) handleBdat(arg string) error {
 	return c.accepted(queueid)
 }
 
+// bindMessageFuncs binds the funcs of c.data on the first message, they serve
+// every message of the session.
+func (c *Conn) bindMessageFuncs() {
+	if c.data.open == nil {
+		c.data.open = c.messageContent
+		c.data.nextCommand = c.nextBdatCommand
+	}
+}
+
+// messageContent returns the reader of the message. For DATA the 354 reply is
+// sent on the first call, a backend that never calls it rejects the message
+// before the client sends it.
+func (c *Conn) messageContent() io.Reader {
+	if c.data.isBdat {
+		return &c.data.bdat
+	}
+	if !c.data.started {
+		c.data.started = true
+		// We have recipients, go to accept data
+		c.writeStatus(deltasmtp.StartMailInput)
+		c.setDataDeadline()
+		c.data.dot.Reset(c.receiver.Reader, c.server.maxMessageBytes)
+	}
+	return &c.data.dot
+}
+
+// nextBdatCommand reads the BDAT command of the next chunk after replying to
+// the previous one.
+func (c *Conn) nextBdatCommand() (cmd string, arg string, err error) {
+	// if bdat is closed (error occurred)
+	if c.data.closed {
+		return "", "", io.EOF
+	}
+	// the reply between chunks isn't limited by the data deadline
+	deadline.SetWrite(c.conn, c.server.commandTimeout)
+	c.writeStatus(deltasmtp.BDATContinue)
+	return c.nextCommand()
+}
+
 func (*Conn) accepted(queueid string) *deltasmtp.Status {
 	if queueid != "" {
 		// limit length if queueid is too long (< 1000)
@@ -1192,17 +1272,41 @@ func (*Conn) accepted(queueid string) *deltasmtp.Status {
 }
 
 func (c *Conn) greet() {
-	protocol := "ESMTP"
-	c.writeStatus(
-		deltasmtp.NewStatusS(220, deltasmtp.NoEnhancedCode, fmt.Sprintf("%v %s Service Ready", c.server.hostname, protocol)),
-	)
+	c.writeStatus(c.server.greeting)
 }
 
 func (c *Conn) writeStatus(status *deltasmtp.Status) {
 	c.logger().LogAttrs(c.ctx, slog.LevelDebug, "write status", slog.Any("status", status))
 
 	_, err := status.WriteTo(c.sender)
+	c.flushReply(err)
+}
 
+// writeOK writes the single line reply "250 2.0.0 " followed by the parts of
+// text. Unlike writeStatus it needs neither a Status nor the joined text, the
+// replies to MAIL and RCPT, which name the address, don't allocate.
+func (c *Conn) writeOK(text ...string) {
+	// Like a status returned to run, the reply gets a fresh deadline after
+	// the session handled the command.
+	c.renewDeadline()
+
+	if logger := c.logger(); logger.Enabled(c.ctx, slog.LevelDebug) {
+		logger.LogAttrs(c.ctx, slog.LevelDebug, "write status",
+			slog.Any("status", deltasmtp.NewStatusS(250, deltasmtp.EnhancedCode{2, 0, 0}, strings.Join(text, ""))))
+	}
+
+	b := append(c.sender.AvailableBuffer(), "250 2.0.0 "...)
+	for _, t := range text {
+		b = append(b, t...)
+	}
+	b = append(b, '\r', '\n')
+
+	_, err := c.sender.Write(b)
+	c.flushReply(err)
+}
+
+// flushReply finishes writing a reply, err is the error of writing it.
+func (c *Conn) flushReply(err error) {
 	// PIPELINE support
 	// If there is something buffered in c.text.R then we can assume another command is following.
 	// This means the client is doing pipelining and we don't need to respond just now.

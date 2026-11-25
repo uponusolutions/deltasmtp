@@ -44,6 +44,11 @@ type backend struct {
 	// Error that will be returned by Data method.
 	dataErr error
 
+	// Errors returned by the Data method without opening the reader, one per
+	// message; a nil error accepts the message. Set it before the session
+	// starts, it is read by the server.
+	dataErrQueue []error
+
 	panicOnMail bool
 	userErr     error
 
@@ -52,6 +57,9 @@ type backend struct {
 
 	// If set, Data ignores read errors and accepts the (truncated) message.
 	swallowDataErr bool
+
+	// How long Rcpt takes.
+	rcptDelay time.Duration
 
 	// Errors passed to Session.Close.
 	closeErrors chan error
@@ -128,12 +136,20 @@ func (s *session) Mail(ctx context.Context, from string, opts *deltasmtp.MailOpt
 }
 
 func (s *session) Rcpt(_ context.Context, to string, opts *deltasmtp.RcptOptions) error {
+	time.Sleep(s.backend.rcptDelay)
 	s.msg.To = append(s.msg.To, to)
 	s.msg.RcptOpts = append(s.msg.RcptOpts, opts)
 	return nil
 }
 
 func (s *session) Data(_ context.Context, r func() io.Reader) (string, error) {
+	if len(s.backend.dataErrQueue) > 0 {
+		err := s.backend.dataErrQueue[0]
+		s.backend.dataErrQueue = s.backend.dataErrQueue[1:]
+		if err != nil {
+			return "", err
+		}
+	}
 	if s.backend.dataErr != nil {
 		err := s.backend.dataErr
 		if s.backend.dataErrors != nil {
@@ -972,6 +988,65 @@ func TestServer_Chunking_Reset(t *testing.T) {
 	require.Empty(t, be.anonmsgs)
 }
 
+// The readers of the message content are reused for every message of a
+// session. A rejected message must not leave state behind for the next one:
+// a failed BDAT transfer must not end the next one after its first chunk, a
+// DATA rejected before the 354 reply must not suppress it for the next one.
+func TestServer_MessagesInOneSession(t *testing.T) {
+	failed := deltasmtp.NewStatusS(555, deltasmtp.EnhancedCode{5, 0, 0}, "I failed")
+	be := &backend{dataErrQueue: []error{failed, nil, failed, nil, nil, nil}}
+	be, s, c, scanner := testServerAuthenticated(t, be, server.WithEnableCHUNKING(true))
+	defer func() {
+		_ = s.Close()
+		_ = c.Close()
+	}()
+
+	envelope := func() {
+		t.Helper()
+		expect(t, c, scanner, "MAIL FROM:<root@nsa.gov>", "250 ")
+		expect(t, c, scanner, "RCPT TO:<root@gchq.gov.uk>", "250 ")
+	}
+	// chunk sends a BDAT chunk as it is, expect would append a CRLF to it.
+	chunk := func(raw, prefix string) {
+		t.Helper()
+		_, _ = io.WriteString(c, raw)
+		requirePrefix(t, readReply(t, c, scanner), prefix)
+	}
+
+	// BDAT rejected by the backend.
+	envelope()
+	chunk("BDAT 8\r\nHey <3\r\n", "555 5.0.0 I failed")
+
+	// BDAT in two chunks.
+	envelope()
+	chunk("BDAT 4\r\nHey ", "250 2.0.0 Continue")
+	chunk("BDAT 4 LAST\r\n<3\r\n", "250 ")
+
+	// DATA rejected by the backend before the 354 reply, the transaction stays
+	// open.
+	envelope()
+	expect(t, c, scanner, "DATA", "555 5.0.0 I failed")
+
+	// DATA in the same transaction, with a stuffed dot.
+	expect(t, c, scanner, "DATA", "354 ")
+	expect(t, c, scanner, "..dot\r\n.", "250 ")
+
+	// DATA after DATA.
+	envelope()
+	expect(t, c, scanner, "DATA", "354 ")
+	expect(t, c, scanner, "again\r\n.", "250 ")
+
+	// BDAT after DATA.
+	envelope()
+	chunk("BDAT 5 LAST\r\nBye\r\n", "250 ")
+
+	require.Len(t, be.messages, 4)
+	require.Equal(t, "Hey <3\r\n", string(be.messages[0].Data))
+	require.Equal(t, ".dot\r\n", string(be.messages[1].Data))
+	require.Equal(t, "again\r\n", string(be.messages[2].Data))
+	require.Equal(t, "Bye\r\n", string(be.messages[3].Data))
+}
+
 func TestServer_Chunking_Close(t *testing.T) {
 	be, s, c, scanner := testServerAuthenticated(t, nil, server.WithEnableCHUNKING(true))
 	defer func() {
@@ -1482,6 +1557,21 @@ func TestServer_CommandTimeoutRenewed(t *testing.T) {
 	}
 
 	requireIdleTimeout(t, c, scanner, time.Now(), timeout)
+}
+
+// The reply to a command gets a fresh deadline after the session handled it,
+// a slow session doesn't let the write of the reply time out.
+func TestServer_CommandTimeoutSlowSession(t *testing.T) {
+	const timeout = 200 * time.Millisecond
+	be := &backend{rcptDelay: 2 * timeout}
+	_, s, c, scanner := testServerAuthenticated(t, be, server.WithCommandTimeout(timeout))
+	defer func() {
+		_ = s.Close()
+		_ = c.Close()
+	}()
+
+	expect(t, c, scanner, "MAIL FROM:<root@nsa.gov>", "250 ")
+	expect(t, c, scanner, "RCPT TO:<root@gchq.gov.uk>", "250 ")
 }
 
 // After a transfer the command timeout starts fresh with the reply. The transfer is

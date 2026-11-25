@@ -23,12 +23,19 @@ import (
 //
 // See the documentation for Reader's DotReader method for details about dot-encoding.
 func NewDot(writer *bufio.Writer) io.WriteCloser {
-	return &dot{
-		W: writer,
-	}
+	d := &Dot{}
+	d.Reset(writer)
+	return d
 }
 
-type dot struct {
+// Reset sets d up to write a new message like a Dot of NewDot. It lets a
+// connection reuse its writer for every message.
+func (d *Dot) Reset(writer *bufio.Writer) {
+	*d = Dot{W: writer}
+}
+
+// Dot writes a dot-encoded message, see NewDot.
+type Dot struct {
 	W     *bufio.Writer
 	state int
 }
@@ -40,7 +47,7 @@ const (
 	wstateData             // writing data in middle of line
 )
 
-func (d *dot) Write(b []byte) (n int, err error) {
+func (d *Dot) Write(b []byte) (n int, err error) {
 	var (
 		i    int
 		p    []byte
@@ -108,7 +115,8 @@ func (d *dot) Write(b []byte) (n int, err error) {
 	return n, err
 }
 
-func (d *dot) Close() error {
+// Close ends the message with the end of data line and flushes it.
+func (d *Dot) Close() error {
 	bw := d.W
 	// nolint revive
 	switch d.state {

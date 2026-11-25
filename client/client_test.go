@@ -864,6 +864,70 @@ func TestClientChunking(t *testing.T) {
 	})
 }
 
+// The writers of the message content are reused for every message of a
+// connection, a message must not leave state behind for the next one. The
+// first message ends in the middle of a line, the leading dot of the second
+// still has to be stuffed.
+func TestClientContentWritersReused(t *testing.T) {
+	messages := []string{"no newline", ".dot\r\n"}
+
+	tests := []struct {
+		name    string
+		ext     string
+		reply   string // to the start and the end of a message
+		content func(c *Client, msg string) (*ContentCloser, error)
+		opts    []Option
+		want    []string
+	}{
+		{
+			name:    "DATA",
+			ext:     "8BITMIME",
+			reply:   "354 go ahead\r\n250 2.0.0 OK\r\n",
+			content: func(c *Client, _ string) (*ContentCloser, error) { return c.Data() },
+			want:    []string{"DATA\r\nno newline\r\n.\r\n", "DATA\r\n..dot\r\n.\r\n"},
+		},
+		{
+			name:    "BDAT known size",
+			ext:     "CHUNKING",
+			reply:   "250 2.0.0 OK\r\n",
+			content: func(c *Client, msg string) (*ContentCloser, error) { return c.Bdat(len(msg)) },
+			want:    []string{"BDAT 10 LAST\r\nno newline", "BDAT 6 LAST\r\n.dot\r\n"},
+		},
+		{
+			name:    "BDAT buffered",
+			ext:     "CHUNKING",
+			reply:   "250 2.0.0 OK\r\n",
+			content: func(c *Client, _ string) (*ContentCloser, error) { return c.Bdat(0) },
+			want:    []string{"BDAT 10 LAST\r\nno newline", "BDAT 6 LAST\r\n.dot\r\n"},
+		},
+		{
+			name:    "BDAT unbuffered",
+			ext:     "CHUNKING",
+			reply:   "250 2.0.0 OK\r\n250 2.0.0 OK\r\n",
+			content: func(c *Client, _ string) (*ContentCloser, error) { return c.Bdat(0) },
+			opts:    []Option{WithChunkingBufferSize(0)},
+			want:    []string{"BDAT 10\r\nno newlineBDAT 0 LAST\r\n", "BDAT 6\r\n.dot\r\nBDAT 0 LAST\r\n"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			c, wrote := fakeClient("250-localhost\r\n250 "+tc.ext+"\r\n"+strings.Repeat(tc.reply, len(messages)), tc.opts...)
+			require.NoError(t, c.ehlo())
+
+			for _, msg := range messages {
+				w, err := tc.content(c, msg)
+				require.NoError(t, err)
+				_, err = io.WriteString(w, msg)
+				require.NoError(t, err)
+				require.NoError(t, w.Close())
+			}
+
+			_, out, _ := strings.Cut(wrote.String(), "\r\n") // without EHLO
+			require.Equal(t, strings.Join(tc.want, ""), out)
+		})
+	}
+}
+
 // TestClientProtocolErrorCloses checks that the connection is closed if a reply
 // can't be read completely. The rest of the reply would otherwise be read as the
 // reply of the next command, every reply after that off by one.

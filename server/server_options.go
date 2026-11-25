@@ -26,6 +26,9 @@ type Server struct {
 
 	hostname string
 
+	greeting   *deltasmtp.Status // see New
+	extensions extensions        // see New
+
 	maxRecipients int
 	// Max transactions (MAIL commands) per session.
 	maxTransactions int
@@ -196,6 +199,11 @@ func New(opts ...Option) *Server {
 	}
 
 	s.logger = cmp.Or(s.logger, slog.Default())
+
+	// Replies which only depend on the options, built once instead of for
+	// every connection.
+	s.greeting = deltasmtp.NewStatusS(220, deltasmtp.NoEnhancedCode, s.hostname+" ESMTP Service Ready")
+	s.extensions = newExtensions(s)
 
 	return s
 }

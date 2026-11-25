@@ -20,6 +20,7 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/base64"
@@ -46,6 +47,15 @@ type Client struct {
 	deadline deadline.Renewer // command deadline of session.conn
 	receiver *smtpreader.Receiver
 	sender   *smtpwriter.Sender
+
+	cmdBuf bytes.Buffer // see cmdBuffer
+
+	// The writers of the message content, reused for every message. The
+	// ContentCloser of a message is done with its writer once it is closed.
+	dotWriter          smtpwriter.Dot
+	bdatWriter         smtpwriter.Bdat
+	bdatBufferedWriter smtpwriter.BdatBuffered
+	bdatReply          func() error // see bdatReplyFunc
 }
 
 // session is the state of the current or, after disconnect, the last connection.
@@ -397,6 +407,35 @@ func (c *Client) cmd(expectCode int, message string) (*deltasmtp.Status, error) 
 // cmdValid is a convenience function that sends a command and returns an error if the expected code doesn't match
 // can handle pipelining
 func (c *Client) cmdValid(pType pipeliningType, expectCode int, message string) error {
+	if err := c.cmdBegin(len(message)); err != nil {
+		return err
+	}
+	if _, err := c.sender.WriteString(message); err != nil {
+		return err
+	}
+	return c.cmdEnd(pType, expectCode)
+}
+
+// cmdBuffer returns the emptied buffer to build a command in, which is sent by
+// cmdValidBuffer. The buffer is reused, building a command doesn't allocate.
+func (c *Client) cmdBuffer() *bytes.Buffer {
+	c.cmdBuf.Reset()
+	return &c.cmdBuf
+}
+
+// cmdValidBuffer is cmdValid for the command built in cmdBuffer.
+func (c *Client) cmdValidBuffer(pType pipeliningType, expectCode int) error {
+	if err := c.cmdBegin(c.cmdBuf.Len()); err != nil {
+		return err
+	}
+	if _, err := c.sender.Write(c.cmdBuf.Bytes()); err != nil {
+		return err
+	}
+	return c.cmdEnd(pType, expectCode)
+}
+
+// cmdBegin prepares sending a command of length n, see cmdValid.
+func (c *Client) cmdBegin(n int) error {
 	if c.session.conn == nil {
 		return ErrNotConnected
 	}
@@ -423,7 +462,7 @@ func (c *Client) cmdValid(pType pipeliningType, expectCode int, message string) 
 		// If the buffer can not hold the first request, ignore congestion.
 		// Typically the 4k buffio is enough to make it fast, it don't expect any buffers from tcp.
 		// Outcomment to see TestClient_SendMailDirectManyRcptsPipelining failing.
-		if len(message)+2 > c.sender.Available() && c.session.pipelining.pending > 0 {
+		if n+2 > c.sender.Available() && c.session.pipelining.pending > 0 {
 			err := c.sender.Flush()
 			if err != nil {
 				return err
@@ -433,12 +472,12 @@ func (c *Client) cmdValid(pType pipeliningType, expectCode int, message string) 
 		}
 	}
 
-	_, err := c.sender.WriteString(message)
-	if err != nil {
-		return err
-	}
+	return nil
+}
 
-	_, err = c.sender.Write(deltasmtp.Crnl)
+// cmdEnd finishes sending a command, see cmdValid.
+func (c *Client) cmdEnd(pType pipeliningType, expectCode int) error {
+	_, err := c.sender.Write(deltasmtp.Crnl)
 	if err != nil {
 		return err
 	}
@@ -540,7 +579,7 @@ func (c *Client) ehlo() error {
 	if err != nil {
 		return err
 	}
-	ext := make(map[string]string)
+	ext := make(map[string]string, max(len(status.Lines)-1, 0))
 
 	if len(status.Lines) > 1 {
 		for _, line := range status.Lines[1:] {
@@ -613,10 +652,7 @@ func (c *Client) Verify(addr string, opts *VrfyOptions) error {
 		return err
 	}
 
-	var sb strings.Builder
-
-	// The builder grows if it's too small, fmt would move it to the heap.
-	sb.Grow(len(addr) + 16)
+	sb := c.cmdBuffer()
 	sb.WriteString("VRFY ")
 	sb.WriteString(addr)
 
@@ -627,7 +663,7 @@ func (c *Client) Verify(addr string, opts *VrfyOptions) error {
 		sb.WriteString(" SMTPUTF8")
 	}
 
-	return c.cmdValid(pipeliningTypeLast, 25, sb.String())
+	return c.cmdValidBuffer(pipeliningTypeLast, 25)
 }
 
 // VerifyResponse returns the result of previous send verify command if pipelining is enabled
@@ -737,10 +773,7 @@ func (c *Client) Mail(from string, opts *MailOptions) error {
 		return err
 	}
 
-	var sb strings.Builder
-	// Enough for the address with BODY, SIZE and SMTPUTF8, the builder grows for
-	// more. fmt would move it to the heap.
-	sb.Grow(len(from) + 64)
+	sb := c.cmdBuffer()
 	sb.WriteString("MAIL FROM:<")
 	sb.WriteString(from)
 	sb.WriteString(">")
@@ -819,7 +852,7 @@ func (c *Client) Mail(from string, opts *MailOptions) error {
 		sb.WriteString(" MT-PRIORITY=")
 		sb.WriteString(strconv.Itoa(*opts.MTPriority))
 	}
-	return c.cmdValid(pipeliningTypeAnywhere, 250, sb.String())
+	return c.cmdValidBuffer(pipeliningTypeAnywhere, 250)
 }
 
 // MailResponse returns the result of previous send mail command if pipelining is enabled
@@ -839,15 +872,12 @@ func (c *Client) Rcpt(to string, opts *deltasmtp.RcptOptions) error {
 	if err := validateLine(to); err != nil {
 		return err
 	}
-	var sb strings.Builder
-	// Enough for the address, the builder grows for DSN and RRVS. fmt would move
-	// it to the heap.
-	sb.Grow(len(to) + 16)
+	sb := c.cmdBuffer()
 	sb.WriteString("RCPT TO:<")
 	sb.WriteString(to)
 	sb.WriteString(">")
 	if _, ok := c.session.ext["DSN"]; ok && opts != nil {
-		if err := rcptDSN(&sb, opts, c.session.ext); err != nil {
+		if err := rcptDSN(sb, opts, c.session.ext); err != nil {
 			return err
 		}
 	}
@@ -855,7 +885,7 @@ func (c *Client) Rcpt(to string, opts *deltasmtp.RcptOptions) error {
 		sb.WriteString(" RRVS=")
 		sb.WriteString(opts.RequireRecipientValidSince.Format(time.RFC3339))
 	}
-	return c.cmdValid(pipeliningTypeAnywhere, 25, sb.String())
+	return c.cmdValidBuffer(pipeliningTypeAnywhere, 25)
 }
 
 // RcptResponse returns the result of previous send rcpt command if pipelining is enabled
@@ -863,7 +893,7 @@ func (c *Client) RcptResponse() error {
 	return c.readResponseValid(25)
 }
 
-func rcptDSN(sb *strings.Builder, opts *deltasmtp.RcptOptions, ext map[string]string) error {
+func rcptDSN(sb *bytes.Buffer, opts *deltasmtp.RcptOptions, ext map[string]string) error {
 	if len(opts.Notify) != 0 {
 		sb.WriteString(" NOTIFY=")
 		if err := parse.CheckNotifySet(opts.Notify); err != nil {
@@ -939,7 +969,8 @@ func (c *Client) Data() (*ContentCloser, error) {
 	if c.PipeliningActive() {
 		return nil, nil
 	}
-	return c.newContentCloser(smtpwriter.NewDot(c.sender.Writer)), nil
+	c.dotWriter.Reset(c.sender.Writer)
+	return c.newContentCloser(&c.dotWriter), nil
 }
 
 // DataResponse returns the result of previous send data command if pipelining is enabled
@@ -947,7 +978,8 @@ func (c *Client) DataResponse() (*ContentCloser, error) {
 	if err := c.readResponseValid(354); err != nil {
 		return nil, err
 	}
-	return c.newContentCloser(smtpwriter.NewDot(c.sender.Writer)), nil
+	c.dotWriter.Reset(c.sender.Writer)
+	return c.newContentCloser(&c.dotWriter), nil
 }
 
 // Bdat issues a BDAT command to the server and returns a writer that
@@ -972,17 +1004,29 @@ func (c *Client) Bdat(size int) (*ContentCloser, error) {
 	if size == 0 && c.cfg.chunkingBufferSize > 0 {
 		buffer := getChunkingBuffer(c.cfg.chunkingBufferSize)
 
-		cc := c.newContentCloser(smtpwriter.NewBdatWriterBuffered(c.sender.Writer, func() error {
-			return c.receiveResponseValid(250)
-		}, size, (*buffer)[:c.cfg.chunkingBufferSize]))
+		c.bdatBufferedWriter.Reset(c.sender.Writer, c.bdatReplyFunc(), size, (*buffer)[:c.cfg.chunkingBufferSize])
+		cc := c.newContentCloser(&c.bdatBufferedWriter)
 		cc.chunkingBuffer = buffer
 
 		return cc, nil
 	}
 
-	return c.newContentCloser(smtpwriter.NewBdat(c.sender.Writer, func() error {
-		return c.receiveResponseValid(250)
-	}, size)), nil
+	c.bdatWriter.Reset(c.sender.Writer, c.bdatReplyFunc(), size)
+	return c.newContentCloser(&c.bdatWriter), nil
+}
+
+// bdatReplyFunc returns the func the BDAT writers read the reply to a chunk
+// with. It is bound once, not for every message.
+func (c *Client) bdatReplyFunc() func() error {
+	if c.bdatReply == nil {
+		c.bdatReply = c.receiveBdatReply
+	}
+	return c.bdatReply
+}
+
+// receiveBdatReply reads the reply to a BDAT chunk.
+func (c *Client) receiveBdatReply() error {
+	return c.receiveResponseValid(250)
 }
 
 // Extension reports whether an extension is support by the server.

@@ -56,19 +56,19 @@ type Arg struct {
 }
 
 // Args takes the arguments proceeding a command and parses them
-// into a list of key/value pairs after uppercasing each key.  Sample arg
+// into a list of key/value pairs after uppercasing each key. Sample arg
 // string:
 //
-//	" BODY=8BITMIME SIZE=1024 SMTPUTF8"
+//	"BODY=8BITMIME SIZE=1024 SMTPUTF8"
 //
-// The leading space is mandatory.
-func Args(s string) ([]Arg, error) {
+// The pairs are appended to args. A caller passing a slice of an array on its
+// stack, e.g. buf[:0] of a [8]Arg, parses the usual arguments without allocating.
+func Args(args []Arg, s string) ([]Arg, error) {
 	if len(s) == 0 {
-		return nil, nil
+		return args, nil
 	}
 
-	args := make([]Arg, 0, strings.Count(s, " "))
-	// Only whitespace is an allowed separator, FieldsSec acceots all Unicode whitespace
+	// Only a space is an allowed separator, strings.Fields would accept all Unicode whitespace.
 	for arg := range strings.SplitSeq(s, " ") {
 		if arg == "" {
 			return nil, fmt.Errorf("empty arg in arg string: %q", s)
@@ -217,6 +217,7 @@ func (p *Parser) adl() error {
 // always quoted, and an unquoted local-part never contains '@', '"', '<', '>'
 // or whitespace.
 func (p *Parser) Mailbox() (string, error) {
+	mbox := p.S
 	localPart, err := p.localPart()
 	if err != nil {
 		return "", fmt.Errorf("in local-part: %v", err)
@@ -237,6 +238,14 @@ func (p *Parser) Mailbox() (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("in domain: %v", err)
 		}
+	}
+
+	// Usually the parsed text is in canonical form already, it is returned as
+	// it is instead of being put together again.
+	parsed := mbox[:len(mbox)-len(p.S)]
+	if len(parsed) == len(localPart)+1+len(domain) && parsed[len(localPart)] == '@' &&
+		strings.HasPrefix(parsed, localPart) && strings.HasSuffix(parsed, domain) {
+		return parsed, nil
 	}
 
 	return localPart + "@" + domain, nil
