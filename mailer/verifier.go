@@ -62,8 +62,9 @@ func (v *Verifier) Active() bool {
 
 // Verify returns nil if the server accepts addr as recipient. A rejection is a
 // *deltasmtp.Status, a refusal of the client matches client.ErrRefused. A failing
-// connect or MAIL, or a server not supporting the command (500, 502, 504), ends the
-// Verifier. SMTPUTF8 is used if the server supports it.
+// connect or MAIL, or with VerifyVrfy a server not supporting VRFY (500, 502, 504), ends
+// the Verifier. With VerifyRcpt these replies reject the address, RCPT is mandatory.
+// SMTPUTF8 is used if the server supports it.
 func (v *Verifier) Verify(ctx context.Context, addr string) error {
 	if v.ended {
 		return ErrVerifierEnded
@@ -95,14 +96,16 @@ func (v *Verifier) verify(ctx context.Context, addr string) error {
 	} else {
 		err = c.cmd(c.client.Verify(addr, &client.VrfyOptions{SMTPUTF8: c.supportsUTF8()}), c.client.VerifyResponse)
 	}
-	if err != nil && (!isRejection(err) || unsupported(err)) {
+	if err != nil && (!isRejection(err) || v.mode == VerifyVrfy && unsupported(err)) {
 		v.dispose()
 	}
 	return c.closeUnlessRejected(err)
 }
 
-// unsupported reports whether err rejects the command itself, not the address: 500, 502
-// or 504 (RFC 5321 section 4.2.3), e.g. Postfix's "502 5.5.1 VRFY command is disabled".
+// unsupported reports whether err of VRFY rejects the command itself, not the address: 500,
+// 502 or 504 (RFC 5321 section 4.2.3), e.g. Postfix's "502 5.5.1 VRFY command is disabled".
+// Not used for RCPT: it is mandatory, there these replies reject the address (e.g. its
+// syntax), and ending the Verifier would leave the transaction open.
 func unsupported(err error) bool {
 	st, ok := err.(*deltasmtp.Status)
 	return ok && (st.Code == 500 || st.Code == 502 || st.Code == 504)

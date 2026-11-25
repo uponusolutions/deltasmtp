@@ -170,6 +170,48 @@ func TestVerifier_ClosingServer(t *testing.T) {
 	}
 }
 
+// TestVerifier_CommandRejected checks a 500 rejecting the command: with VerifyVrfy it means
+// VRFY is unsupported and ends the Verifier, with VerifyRcpt it rejects the address, the
+// Verifier stays active in the same transaction. Both leave the Mailer usable.
+func TestVerifier_CommandRejected(t *testing.T) {
+	for _, pc := range pipeliningCases {
+		t.Run(pc.name, func(t *testing.T) {
+			srv, opts := newVerifyServer(t, pc.pipelining)
+			for _, verb := range []string{"RCPT", "VRFY"} {
+				handler := srv.Handlers[verb]
+				srv.Handlers[verb] = func(fs *tester.FakeSession, line string) bool {
+					if strings.Contains(line, "syntax") {
+						fs.Reply("500 5.5.2 syntax error")
+						return true
+					}
+					return handler(fs, line)
+				}
+			}
+			m := New(opts...)
+			t.Cleanup(func() { _ = m.Terminate() })
+
+			v, err := m.Verifier(VerifyVrfy, "alice@internal.com")
+			require.NoError(t, err)
+			require.ErrorContains(t, v.Verify(t.Context(), "syntax@external.com"), "500 5.5.2")
+			assert.False(t, v.Active())
+			require.ErrorIs(t, v.Verify(t.Context(), "bob@external.com"), ErrVerifierEnded)
+
+			v, err = m.Verifier(VerifyRcpt, "alice@internal.com")
+			require.NoError(t, err)
+			require.ErrorContains(t, v.Verify(t.Context(), "syntax@external.com"), "500 5.5.2")
+			assert.True(t, v.Active())
+			require.NoError(t, v.Verify(t.Context(), "bob@external.com"))
+			require.NoError(t, v.End())
+
+			_, err = m.Send(t.Context(), "alice@internal.com", []string{"bob@external.com"}, "Subject: x\r\n\r\nhi\r\n")
+			require.NoError(t, err)
+			assert.True(t, m.Connected())
+			assert.Equal(t, 1, connections(srv))
+			assert.Equal(t, []string{"VRFY", "MAIL", "RCPT", "RCPT", "RSET", "MAIL", "RCPT"}, verbs(srv)[:7])
+		})
+	}
+}
+
 // TestVerifier_RejectedSender checks that a rejected or refused MAIL ends the Verifier
 // and leaves the Mailer usable and connected.
 func TestVerifier_RejectedSender(t *testing.T) {
