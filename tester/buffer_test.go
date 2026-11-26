@@ -23,6 +23,6 @@ func TestBuffer(t *testing.T) {
 	require.Equal(t, []byte{'c'}, cache[:i])
 
 	i, err = buf.Read(cache)
-	require.Error(t, io.EOF, err)
+	require.ErrorIs(t, err, io.EOF)
 	require.Equal(t, 0, i)
 }

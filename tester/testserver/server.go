@@ -86,7 +86,8 @@ func (b *Backend) Load(from string, recipients []string) (*tester.Mail, bool) {
 		return nil, ok
 	}
 
-	return i.(*tester.Mail), ok //nolint
+	m, ok := i.(*tester.Mail)
+	return m, ok
 }
 
 ///////////////////////////////////////////////////////////////////////////

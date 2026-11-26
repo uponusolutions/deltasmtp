@@ -162,12 +162,12 @@ func (p *Parser) Path() (string, error) {
 	hasBracket := p.acceptByte('<')
 	if hasBracket && p.acceptByte('@') {
 		if err := p.adl(); err != nil {
-			return "", fmt.Errorf("in a-d-l: %v", err)
+			return "", fmt.Errorf("in a-d-l: %w", err)
 		}
 	}
 	mbox, err := p.Mailbox()
 	if err != nil {
-		return "", fmt.Errorf("in mailbox: %v", err)
+		return "", fmt.Errorf("in mailbox: %w", err)
 	}
 	if hasBracket {
 		if err := p.expectByte('>'); err != nil {
@@ -220,7 +220,7 @@ func (p *Parser) Mailbox() (string, error) {
 	mbox := p.S
 	localPart, err := p.localPart()
 	if err != nil {
-		return "", fmt.Errorf("in local-part: %v", err)
+		return "", fmt.Errorf("in local-part: %w", err)
 	}
 
 	if err := p.expectByte('@'); err != nil {
@@ -231,12 +231,12 @@ func (p *Parser) Mailbox() (string, error) {
 	if ch, _ := p.peekByte(); ch == '[' {
 		domain, err = p.addressLiteral()
 		if err != nil {
-			return "", fmt.Errorf("in address-literal: %v", err)
+			return "", fmt.Errorf("in address-literal: %w", err)
 		}
 	} else {
 		domain, err = p.domain()
 		if err != nil {
-			return "", fmt.Errorf("in domain: %v", err)
+			return "", fmt.Errorf("in domain: %w", err)
 		}
 	}
 

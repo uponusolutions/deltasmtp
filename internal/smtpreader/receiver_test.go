@@ -2,6 +2,7 @@ package smtpreader
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"strconv"
 	"strings"
@@ -148,7 +149,7 @@ func TestReadMultiLine(t *testing.T) {
 
 	err := r.ReadResponseValid(250)
 	require.Error(t, err)
-	status, ok := err.(*deltasmtp.Status)
+	status, ok := errors.AsType[*deltasmtp.Status](err)
 	require.True(t, ok)
 
 	require.Equal(t, expectedText, status.Text())

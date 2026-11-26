@@ -287,7 +287,7 @@ func (c *Client) receiveResponseValid(expectCode int) error {
 		return err
 	}
 	err := c.receiver.ReadResponseValid(expectCode)
-	if st, ok := err.(*deltasmtp.Status); err != nil && (!ok || st.Code == 421) {
+	if st, ok := errors.AsType[*deltasmtp.Status](err); err != nil && (!ok || st.Code == 421) {
 		_ = c.Close()
 	}
 	return err
@@ -330,7 +330,7 @@ func (c *Client) Hello() error {
 
 	err := c.ehlo()
 
-	if status, ok := err.(*deltasmtp.Status); err != nil && (ok && (status.Code == 500 || status.Code == 502)) {
+	if status, ok := errors.AsType[*deltasmtp.Status](err); ok && (status.Code == 500 || status.Code == 502) {
 		// The server doesn't support EHLO, fallback to HELO
 		err = c.helo()
 	}
@@ -458,7 +458,7 @@ func (c *Client) cmdBegin(n int) error {
 		// always, 4K octets.  Failure to perform this check can lead to
 		// deadlock conditions.
 
-		// Need to flush to prevent congestion and concluse group forcefully.
+		// Need to flush to prevent congestion and conclude the group forcefully.
 		// If the buffer can not hold the first request, ignore congestion.
 		// Typically the 4k buffio is enough to make it fast, it don't expect any buffers from tcp.
 		// Outcomment to see TestClient_SendMailDirectManyRcptsPipelining failing.
@@ -767,7 +767,8 @@ func (c *Client) authAbort(err error) error {
 // to the command. Handling of unsupported options depends on the extension.
 //
 // If server returns an error, it will be of type *deltasmtp.
-// nolint:revive
+//
+//nolint:revive // cognitive-complexity: one branch per MAIL parameter, splitting hides the order.
 func (c *Client) Mail(from string, opts *MailOptions) error {
 	if err := validateLine(from); err != nil {
 		return err
@@ -839,7 +840,7 @@ func (c *Client) Mail(from string, opts *MailOptions) error {
 			(opts.DeliverBy.Seconds < -999999999 || opts.DeliverBy.Seconds > 999999999) {
 			return refusedError("smtp: DELIVERBY mode must be between -999999999 and 999999999 with notify mode")
 		}
-		arg := fmt.Sprintf(" BY=%d;%s", int(opts.DeliverBy.Seconds), opts.DeliverBy.Mode)
+		arg := fmt.Sprintf(" BY=%d;%s", opts.DeliverBy.Seconds, opts.DeliverBy.Mode)
 		if opts.DeliverBy.Trace {
 			arg += "T"
 		}

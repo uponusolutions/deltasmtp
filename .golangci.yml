@@ -1,153 +1,129 @@
 version: "2"
 linters:
+  # Added on top of the standard set (errcheck, govet, ineffassign, staticcheck, unused).
   enable:
+    # Security issues like weak crypto, unchecked conversions or unsafe file access.
     - gosec
+    # Style and correctness rules, configured below.
     - revive
+    # Unchecked errors, part of the standard set, listed for its settings below.
     - errcheck
+    # Line length, see the settings below.
     - lll
+    # Errors must be compared with errors.Is/As and wrapped with %w. Status errors are
+    # handed to callers and backends, a == or a type assertion misses a wrapped one.
+    - errorlint
+    # Correct testify usage, e.g. require.Len instead of comparing len() or
+    # require.ErrorIs instead of require.Error with a target.
+    - testifylint
+    # Common English misspellings in comments and strings.
+    - misspell
+    # Unnecessary type conversions.
+    - unconvert
+    # fmt calls that can be replaced by faster strconv or string functions.
+    - perfsprint
+    # nolint directives must be well formed, name the linter, give a reason and still
+    # suppress something. A malformed directive like "// nolint" is silently ignored.
+    - nolintlint
   settings:
     lll:
-      # Max line length, lines longer will be reported.
-      # '\t' is counted as 1 character by default, and can be changed with the tab-width option.
-      # Default: 120.
       line-length: 120
-      # Tab width in spaces.
-      # Default: 1
+      # A tab counts as one character.
       tab-width: 1
     errcheck:
       exclude-functions:
+        # Removing a temporary file is best effort.
         - os.Remove
-    godot:
-      scope: toplevel
-      exclude:
-        - "^todo:"
-        - "^fixme:"
-        - //
-    gosec:
-      excludes:
-        - G402
+    nolintlint:
+      require-specific: true
+      require-explanation: true
+    testifylint:
+      disable:
+        # assert after an error is used on purpose: loops report every failing item
+        # and cleanup checks run after the main assertion.
+        - require-error
     revive:
       enable-all-rules: true
       rules:
+        # Rules with adjusted limits.
+        - name: banned-characters
+          arguments: [Ω, Σ, σ]
+        - name: function-result-limit
+          arguments: [4]
+        - name: function-length
+          # Max statements, max lines.
+          arguments: [80, 200]
+        - name: cognitive-complexity
+          arguments: [40]
+        - name: argument-limit
+          arguments: [8]
+        # Disabled rules.
+        # Anonymous structs are used for local grouping, e.g. table tests.
         - name: nested-structs
           disabled: true
+        # Import aliases are allowed even if they match the package name.
         - name: redundant-import-alias
-          severity: warning
           disabled: true
-        - name: banned-characters
-          arguments:
-            - Ω
-            - Σ
-            - σ
-          severity: warning
-          disabled: false
-        - name: function-result-limit
-          arguments:
-            - 4
-          severity: warning
-          disabled: false
-        - name: function-length
-          arguments:
-            - 80
-            - 200
-          severity: warning
-          disabled: false
+        # Covered by lll.
         - name: line-length-limit
-          arguments:
-            - 120
-          severity: warning
           disabled: true
+        # cognitive-complexity is used instead, cyclomatic complexity punishes flat switches.
         - name: cyclomatic
-          arguments:
-            - 3
-          severity: warning
           disabled: true
-        - name: cognitive-complexity
-          arguments:
-            - 40
-          severity: warning
-          disabled: false
-        - name: argument-limit
-          arguments:
-            - 8
-          severity: warning
-          disabled: false
+        # No license header is required in each file.
         - name: file-header
-          severity: warning
           disabled: true
+        # Packages are organized by responsibility, not by the number of public structs.
         - name: max-public-structs
-          arguments:
-            - 3
-          severity: warning
           disabled: true
+        # Protocol codes and limits are clearer as literals next to their RFC comment.
         - name: add-constant
-          arguments:
-            - allowFloats: 0.0,0.,1.0,1.,2.0,2.
-              allowInts: 0,1,2
-              allowStrs: '""'
-              maxLitCount: "3"
-          severity: warning
           disabled: true
+        # Unchecked errors are covered by errcheck.
         - name: unhandled-error
-          arguments:
-            - fmt.Printf
-            - myFunction
-          severity: warning
           disabled: true
+        # Allows comments like //go:build or commented out code without a space.
         - name: comment-spacings
-          severity: warning
           disabled: true
+        # Not every package has a package comment.
         - name: package-comments
-          severity: warning
           disabled: true
+        # Boolean options are part of the API, e.g. pipelining or last chunk flags.
         - name: flag-parameter
-          severity: warning
           disabled: true
-        - name: exported
-          severity: warning
-          disabled: false
+        # break in a switch case is used for clarity.
         - name: useless-break
-          severity: warning
           disabled: true
+        # Variables may share a name with an imported package.
         - name: import-shadowing
-          severity: warning
           disabled: true
+        # Examples and tests may call os.Exit or log.Fatal.
         - name: deep-exit
-          severity: warning
           disabled: true
+        # Names like Id or Url in existing APIs are kept.
         - name: var-naming
-          severity: warning
           disabled: true
+        # Explicit zero values and types in var declarations are allowed.
         - name: var-declaration
-          severity: warning
           disabled: true
+        # Methods may differ only in capitalization, e.g. an exported and an internal variant.
         - name: confusing-naming
-          severity: warning
           disabled: true
   exclusions:
-    rules:
-      # Allow long function declarations.
-      - linters:
-          - lll
-        source: "^func|func\\("
-      # Do not lint go:generate lines.
-      - linters:
-          - lll
-        source: "^//go:generate "
     generated: lax
-    paths:
-      - filelink
-      - audit
-      - addin
-      - third_party$
-      - builtin$
-      - examples$
+    rules:
+      # Function signatures can't be wrapped nicely.
+      - linters: [lll]
+        source: "^func|func\\("
+      - linters: [lll]
+        source: "^//go:generate "
+      # G402: tests connect to self-signed test servers with InsecureSkipVerify.
+      # G404: tests use seeded generators, a failing seed or payload can be reproduced.
+      - linters: [gosec]
+        path: _test\.go
+        text: G402|G404
 formatters:
   enable:
     - gofumpt
   exclusions:
     generated: lax
-    paths:
-      - third_party$
-      - builtin$
-      - examples$

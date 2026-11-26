@@ -48,7 +48,7 @@ func (s *Server) Serve(ctx context.Context, l net.Listener) error {
 				return nil
 			default:
 			}
-			if ne, ok := err.(net.Error); ok && ne.Timeout() {
+			if ne, ok := errors.AsType[net.Error](err); ok && ne.Timeout() {
 				// Doubles from 5ms up to 1s.
 				tempDelay = min(max(2*tempDelay, 5*time.Millisecond), time.Second)
 				s.logger.ErrorContext(

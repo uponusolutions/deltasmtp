@@ -173,7 +173,7 @@ func (d *Bdat) Close() error {
 		}
 	}
 
-	// if size is not known a bdat 0 last is neccesary
+	// if size is not known a bdat 0 last is necessary
 	if !d.knownSize || !d.started {
 		if _, err := d.w.Write(ending); err != nil {
 			return err

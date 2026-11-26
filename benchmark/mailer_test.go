@@ -105,10 +105,9 @@ func testServer(bei *backend, opts ...server.Option) (be *backend, s *server.Ser
 		return nil, nil, "", err
 	}
 
-	go func() {
-		// nolint: revive
+	go func(s *server.Server) {
 		_ = s.Serve(ctx, l)
-	}()
+	}(s)
 
 	return be, s, l.Addr().String(), nil
 }

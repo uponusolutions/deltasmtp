@@ -91,7 +91,7 @@ func (t *transaction) prepare(from string, mailOptions *client.MailOptions, rcpt
 
 		opts := rcptOption(rcptsOptions, i)
 		err := c.client.Rcpt(addr, opts)
-		if err == client.ErrPipeliningCongestion {
+		if errors.Is(err, client.ErrPipeliningCongestion) {
 			if err = t.flush(i); err != nil {
 				return nil, err
 			}
@@ -117,7 +117,7 @@ func (t *transaction) prepare(from string, mailOptions *client.MailOptions, rcpt
 	}
 
 	w, err := c.client.Content(size)
-	if err == client.ErrPipeliningCongestion {
+	if errors.Is(err, client.ErrPipeliningCongestion) {
 		if err = t.flush(len(t.rcpts)); err != nil {
 			return nil, err // DATA wasn't sent
 		}
@@ -196,7 +196,7 @@ func (t *transaction) contentResponse(size int) (*client.ContentCloser, error) {
 // tooManyRcpts reports whether err rejects a RCPT for too many recipients: 452 (RFC 5321
 // section 4.5.3.1.10) with X.5.3 or no enhanced code, or 552 with X.5.3, treated as 452.
 func tooManyRcpts(err error) bool {
-	st, ok := err.(*deltasmtp.Status)
+	st, ok := errors.AsType[*deltasmtp.Status](err)
 	if !ok {
 		return false
 	}
@@ -237,7 +237,7 @@ func (c *Mailer) resetOrClose() error {
 // isRejection reports whether err rejects a command and leaves the connection in sync:
 // a server reply other than 421 or a refusal of the client.
 func isRejection(err error) bool {
-	if st, ok := err.(*deltasmtp.Status); ok {
+	if st, ok := errors.AsType[*deltasmtp.Status](err); ok {
 		return st.Code != 421
 	}
 	return errors.Is(err, client.ErrRefused)

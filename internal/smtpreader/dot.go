@@ -3,6 +3,7 @@ package smtpreader
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"io"
 
 	"github.com/uponusolutions/deltasmtp"
@@ -46,7 +47,8 @@ const (
 // Run data through a simple state machine to
 // elide leading dots and detect End-of-Data
 // (<CR><LF>.<CR><LF>) line.
-// nolint:revive
+//
+//nolint:revive // cognitive-complexity: a single state machine loop keeps the hot path fast.
 func (r *Dot) Read(b []byte) (int, error) {
 	if r.state == stateEOF {
 		return 0, io.EOF
@@ -190,7 +192,7 @@ func (r *Dot) finalize(n int, skipped int, err error) (int, error) {
 		return n, nil
 	}
 
-	if err == io.EOF && r.state != stateEOF {
+	if errors.Is(err, io.EOF) && r.state != stateEOF {
 		err = io.ErrUnexpectedEOF
 	} else if err == nil && r.state == stateEOF {
 		err = io.EOF

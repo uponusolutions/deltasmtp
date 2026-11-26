@@ -1,6 +1,7 @@
 package smtpreader
 
 import (
+	"errors"
 	"io"
 	"strconv"
 	"strings"
@@ -80,7 +81,7 @@ func (d *Bdat) Read(b []byte) (int, error) {
 
 		cmd, arg, err := d.nextCommand()
 		if err != nil {
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				return 0, deltasmtp.ErrConnection
 			}
 			return 0, err
@@ -119,7 +120,7 @@ func (d *Bdat) Read(b []byte) (int, error) {
 	d.size -= int64(n)
 
 	// the reader should never throw EOF
-	if err == io.EOF {
+	if errors.Is(err, io.EOF) {
 		err = deltasmtp.ErrConnection
 	}
 

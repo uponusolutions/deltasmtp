@@ -9,6 +9,7 @@ import (
 	"log"
 	"log/slog"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -103,15 +104,15 @@ func TestMain(m *testing.M) {
 				log.Printf("smtp server response %s", err)
 			}
 		}()
-		// nolint:revive
-		defer func() {
-			if err := sc.Close(); err != nil {
-				slog.Error("error closing server", "err", err)
-			}
-		}()
 	}
 
 	m.Run()
+
+	for _, sc := range s {
+		if err := sc.Close(); err != nil {
+			slog.Error("error closing server", "err", err)
+		}
+	}
 }
 
 func TestClient_DisconnectTwicePipeline(t *testing.T) {
@@ -197,7 +198,7 @@ func TestClient_SendMailAutoconnect(t *testing.T) {
 
 func TestClient_SendMail(t *testing.T) {
 	for i, sa := range addr {
-		t.Run(fmt.Sprint(i), func(t *testing.T) {
+		t.Run(strconv.Itoa(i), func(t *testing.T) {
 			basic := WithBasic(client.WithPipelining(false))
 			if i == 1 {
 				basic = WithBasic(client.WithReaderSize(1), client.WithWriterSize(1), client.WithPipelining(true))
@@ -309,7 +310,7 @@ func TestClient_SendMailDirectManyRcptsPipelining(t *testing.T) {
 
 func TestClient_SendMailRcptMaxSplitsTransactions(t *testing.T) {
 	for i, sa := range addr[:2] {
-		t.Run(fmt.Sprint(i), func(t *testing.T) {
+		t.Run(strconv.Itoa(i), func(t *testing.T) {
 			data := []byte("Hello World!")
 			from := "alice@internal.com"
 			recipients := makeEmails(1001)
@@ -380,8 +381,8 @@ func TestClient_SendMailDirectAllRejectedPipelining(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	require.Equal(t, 0, len(res.Responses))
-	require.Equal(t, 1, len(res.Failures))
+	require.Empty(t, res.Responses)
+	require.Len(t, res.Failures, 1)
 	require.Equal(t, recipients, res.Failures[0].Rcpts)
 }
 
@@ -585,7 +586,7 @@ func TestClient_SendMailDirectFail(t *testing.T) {
 		withTestServer(addr[0]),
 		WithBasic(client.WithPipelining(false)),
 	)
-	require.Equal(t, 1, len(rec.Failures))
+	require.Len(t, rec.Failures, 1)
 	require.Equal(t, []string{"notfound@external.com"}, rec.Failures[0].Rcpts)
 	require.ErrorContains(t, rec.Failures[0].Error, "550")
 
@@ -602,7 +603,7 @@ func TestClient_SendMail_MultipleAddresses(t *testing.T) {
 	c := New(withTestServer(addr[0], "0.0.0.0")) // second is invalid
 	require.NotNil(t, c)
 
-	require.Equal(t, "", c.ServerAddress())
+	require.Empty(t, c.ServerAddress())
 	require.NoError(t, c.Connect(context.Background()))
 	require.Equal(t, addr[0], c.ServerAddress())
 	require.Equal(t, "localhost", c.ServerName())
@@ -613,7 +614,7 @@ func TestClient_SendMail_MultipleAddresses(t *testing.T) {
 	c = New(withTestServer("0.0.0.0", addr[0])) // second is invalid
 	require.NotNil(t, c)
 
-	require.Equal(t, "", c.ServerAddress())
+	require.Empty(t, c.ServerAddress())
 	require.NoError(t, c.Connect(context.Background()))
 	require.Equal(t, addr[0], c.ServerAddress())
 	require.Equal(t, "localhost", c.ServerName())

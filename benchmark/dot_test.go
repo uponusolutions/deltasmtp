@@ -49,7 +49,6 @@ var payloadConfigs = []payloadConfig{
 // binaryPayload returns pseudo-random bytes. This is the codec's fast path:
 // random data holds roughly one line break every 256 bytes and no leading dots,
 // so neither stuffing nor unstuffing is ever exercised.
-// nolint:gosec
 func binaryPayload(size int) []byte {
 	rng := rand.New(rand.NewPCG(1, 0x5eed))
 
@@ -58,9 +57,9 @@ func binaryPayload(size int) []byte {
 		binary.LittleEndian.PutUint64(p[i:], rng.Uint64())
 	}
 
-	for i := len(p) - len(p)%8; i < len(p); i++ {
-		p[i] = byte(rng.Uint32())
-	}
+	var tail [8]byte
+	binary.LittleEndian.PutUint64(tail[:], rng.Uint64())
+	copy(p[len(p)-len(p)%8:], tail[:])
 
 	return p
 }
@@ -68,7 +67,6 @@ func binaryPayload(size int) []byte {
 // textPayload returns CRLF-terminated ASCII lines, every eighth of which starts
 // with a dot. That is what a real message looks like to the codec, and it is
 // the only variant that makes the encoder stuff and the decoder unstuff.
-// nolint:gosec
 func textPayload(size int) []byte {
 	rng := rand.New(rand.NewPCG(2, 0x5eed))
 
@@ -82,7 +80,7 @@ func textPayload(size int) []byte {
 		}
 
 		for len(line) < 76 {
-			line = append(line, byte('a'+rng.IntN(26)))
+			line = append(line, "abcdefghijklmnopqrstuvwxyz"[rng.IntN(26)])
 		}
 
 		line = append(line, '\r', '\n')

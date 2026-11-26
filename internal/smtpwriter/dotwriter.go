@@ -118,24 +118,21 @@ func (d *Dot) Write(b []byte) (n int, err error) {
 // Close ends the message with the end of data line and flushes it.
 func (d *Dot) Close() error {
 	bw := d.W
-	// nolint revive
-	switch d.state {
-	default:
-		if err := bw.WriteByte('\r'); err != nil {
-			return err
-		}
-		fallthrough
-	case wstateCR:
+	// End an unfinished line before the end of data line.
+	if d.state != wstateBeginLine {
 		// normally \r gets ignored if no \n follows, but at closing we just take it as a line break
 		// same behavior as original textproto
+		if d.state != wstateCR {
+			if err := bw.WriteByte('\r'); err != nil {
+				return err
+			}
+		}
 		if err := bw.WriteByte('\n'); err != nil {
 			return err
 		}
-		fallthrough
-	case wstateBeginLine:
-		if _, err := bw.Write(deltasmtp.Dotcrnl); err != nil {
-			return err
-		}
+	}
+	if _, err := bw.Write(deltasmtp.Dotcrnl); err != nil {
+		return err
 	}
 	return bw.Flush()
 }

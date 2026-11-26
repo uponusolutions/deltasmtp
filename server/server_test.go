@@ -255,10 +255,9 @@ func testServer(t *testing.T, bei *backend, opts ...server.Option) (be *backend,
 	l, err := s.Listen()
 	require.NoError(t, err)
 
-	go func() {
-		// nolint: revive
+	go func(s *server.Server) {
 		_ = s.Serve(context.Background(), l)
-	}()
+	}(s)
 
 	if be.clientTls {
 		c, err = tls.Dial("tcp", l.Addr().String(), &tls.Config{InsecureSkipVerify: true})
@@ -277,7 +276,7 @@ func testServerGreeted(t *testing.T, bei *backend, opts ...server.Option) (be *b
 	return be, s, c, scanner
 }
 
-// nolint: revive
+//nolint:revive // function-result-limit: test helper returning everything a test needs.
 func testServerEhlo(t *testing.T, bei *backend, opts ...server.Option) (be *backend, s *server.Server, c net.Conn, scanner *bufio.Scanner, caps map[string]bool) {
 	t.Helper()
 	be, s, c, scanner = testServerGreeted(t, bei, opts...)

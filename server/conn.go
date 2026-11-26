@@ -116,7 +116,7 @@ func (c *Conn) run() (err error) {
 		err = c.handle(cmd, arg)
 		if err != nil {
 			// if error is a smtp status it isn't necessary to close the connection
-			if smtpErr, ok := err.(*deltasmtp.Status); ok {
+			if smtpErr, ok := errors.AsType[*deltasmtp.Status](err); ok {
 				// Service closing transmission channel, after quit
 				if smtpErr.Code == 221 {
 					return smtpErr
@@ -549,18 +549,18 @@ func (c *Conn) handleError(err error) {
 	// e.g. after a timeout the deadline is over, the reply needs a new one
 	c.renewDeadline()
 
-	if err == io.EOF || errors.Is(err, net.ErrClosed) {
+	if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) {
 		c.Close(fmt.Errorf("connection closed unexpectedly: %w", err))
 		return
 	}
 
-	if neterr, ok := err.(net.Error); ok && neterr.Timeout() {
+	if neterr, ok := errors.AsType[net.Error](err); ok && neterr.Timeout() {
 		c.writeStatus(deltasmtp.ErrIdleTimeout)
 		c.Close(fmt.Errorf("idle timeout: %w", err))
 		return
 	}
 
-	if smtpErr, ok := err.(*deltasmtp.Status); ok {
+	if smtpErr, ok := errors.AsType[*deltasmtp.Status](err); ok {
 		c.writeStatus(smtpErr)
 
 		if smtpErr.Code != 221 {
@@ -584,7 +584,7 @@ func (c *Conn) handleError(err error) {
 		return
 	}
 
-	if err == deltasmtp.ErrTooLongLine {
+	if errors.Is(err, deltasmtp.ErrTooLongLine) {
 		c.writeStatus(deltasmtp.ErrCommandLineTooLong)
 		c.Close(errors.New("line too long"))
 		return
@@ -607,7 +607,8 @@ func (c *Conn) logger() *slog.Logger {
 }
 
 // READY state -> waiting for MAIL
-// nolint: revive
+//
+//nolint:revive // function-length: one block per MAIL parameter, splitting hides the order.
 func (c *Conn) handleMail(arg string) error {
 	// RFC 9422: every MAIL command counts, regardless of whether it succeeds.
 	c.transactions++
@@ -745,7 +746,7 @@ func (c *Conn) handleMail(arg string) error {
 	c.tx.smtputf8 = opts.UTF8
 
 	if err := c.session.Mail(c.ctx, from, opts); err != nil {
-		if smtpErr, ok := err.(*deltasmtp.Status); ok {
+		if smtpErr, ok := errors.AsType[*deltasmtp.Status](err); ok {
 			// a positive response also counts as a success
 			if smtpErr.Positive() {
 				c.state = stateMail
@@ -790,7 +791,7 @@ func (c *Conn) validateAddress(addr string, rejected *deltasmtp.Status) error {
 		return nil
 	}
 
-	if status, ok := err.(*deltasmtp.Status); ok && status.Positive() {
+	if status, ok := errors.AsType[*deltasmtp.Status](err); ok && status.Positive() {
 		// A positive reply would end the command without a result.
 		err = errors.New("address validator returned a positive reply")
 	}
@@ -867,7 +868,7 @@ func (c *Conn) handleRcpt(arg string) error {
 	}
 
 	if err := c.session.Rcpt(c.ctx, recipient, opts); err != nil {
-		if smtpErr, ok := err.(*deltasmtp.Status); ok {
+		if smtpErr, ok := errors.AsType[*deltasmtp.Status](err); ok {
 			// a positive response also counts as a success
 			if smtpErr.Positive() {
 				c.tx.recipients++
@@ -1101,7 +1102,7 @@ func (c *Conn) handleData(arg string) error {
 	uuid, err := c.session.Data(c.ctx, c.data.open)
 
 	// an error which isn't a smtp status error will always terminate the connection
-	if _, ok := err.(*deltasmtp.Status); err != nil && !ok {
+	if _, ok := errors.AsType[*deltasmtp.Status](err); err != nil && !ok {
 		return err
 	}
 
@@ -1190,7 +1191,7 @@ func (c *Conn) handleBdat(arg string) error {
 
 	queueid, err := c.session.Data(c.ctx, c.data.open)
 
-	smtpErr, isStatus := err.(*deltasmtp.Status)
+	smtpErr, isStatus := errors.AsType[*deltasmtp.Status](err)
 
 	// an error which isn't a SMTPStatus error will always terminate the connection
 	if err != nil && !isStatus {
@@ -1331,7 +1332,7 @@ func (c *Conn) flushReply(err error) {
 
 // newStatusError returns err if it is a status, otherwise it logs err and returns status.
 func (c *Conn) newStatusError(status *deltasmtp.Status, err error) *deltasmtp.Status {
-	if smtpErr, ok := err.(*deltasmtp.Status); ok {
+	if smtpErr, ok := errors.AsType[*deltasmtp.Status](err); ok {
 		return smtpErr
 	}
 	c.logger().ErrorContext(c.ctx, status.Text(), slog.Any("err", err))

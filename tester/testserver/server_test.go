@@ -63,7 +63,7 @@ func TestSendMail(t *testing.T) {
 	data := []byte("Test mail\r\n")
 
 	// Send without TLS.
-	require.Nil(t, s.SendMail(addr, nil, from, recipients, data))
+	require.NoError(t, s.SendMail(addr, nil, from, recipients, data))
 
 	m, found := GetBackend(srv).Load(from, recipients)
 	assert.True(t, found)

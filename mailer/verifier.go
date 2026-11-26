@@ -107,7 +107,7 @@ func (v *Verifier) verify(ctx context.Context, addr string) error {
 // Not used for RCPT: it is mandatory, there these replies reject the address (e.g. its
 // syntax), and ending the Verifier would leave the transaction open.
 func unsupported(err error) bool {
-	st, ok := err.(*deltasmtp.Status)
+	st, ok := errors.AsType[*deltasmtp.Status](err)
 	return ok && (st.Code == 500 || st.Code == 502 || st.Code == 504)
 }
 
@@ -128,7 +128,7 @@ func (v *Verifier) begin(ctx context.Context) error {
 	if v.mode == VerifyRcpt {
 		v.accepted = 0
 		switch err := c.mail(v.from, &client.MailOptions{SMTPUTF8: c.supportsUTF8()}, true); {
-		case err == errRenew:
+		case errors.Is(err, errRenew):
 			return v.begin(ctx)
 		case err != nil:
 			return c.closeUnlessRejected(err)

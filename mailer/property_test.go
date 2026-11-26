@@ -165,7 +165,7 @@ func TestSendProperties(t *testing.T) {
 	kinds := []string{"ok", "ok", "ok", "ok", "nf", "nf", "tmp", "once", "once"}
 
 	for seed := range uint64(300) {
-		rnd := rand.New(rand.NewPCG(seed, 0)) //nolint:gosec // seeded, a failing seed can be run again
+		rnd := rand.New(rand.NewPCG(seed, 0))
 		srv := &randomServer{
 			pipelining: rnd.IntN(2) == 0,
 			rcptMax:    rnd.IntN(4),
