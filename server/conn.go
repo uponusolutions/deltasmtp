@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net"
 	"slices"
 	"strconv"
@@ -1138,8 +1139,15 @@ func (c *Conn) discardBdat(size int64) error {
 	if c.server.maxMessageBytes > 0 && size > c.server.maxMessageBytes {
 		return errMessageTooLarge
 	}
-	_, err := c.receiver.Discard(int(size))
-	return err
+	// A chunk size can exceed int on 32-bit platforms, discard it in steps.
+	for size > 0 {
+		step := min(size, math.MaxInt32)
+		if _, err := c.receiver.Discard(int(step)); err != nil {
+			return err
+		}
+		size -= step
+	}
+	return nil
 }
 
 func (c *Conn) handleBdatDiscard(arg string) error {

@@ -9,11 +9,12 @@ cover:
 	go tool -modfile=go.tool.mod cover -html=coverage.out -o coverage.html
 
 # gopls check runs the gopls analyzers as shown by editors, golangci-lint can't run
-# them. gopls has its own tool module, it needs another golang.org/x/tools than golangci-lint.
+# them. -severity=hint includes the modernize suggestions, the default only reports warnings.
+# gopls has its own tool module, it needs another golang.org/x/tools than golangci-lint.
 lint:
 	echo "Linting go"
 	go tool -modfile=go.tool.mod golangci-lint run
-	out=$$(go tool -modfile=go.gopls.mod gopls check $$(git ls-files --cached --others --exclude-standard '*.go' ':!:benchmark/compare/*')) && \
+	out=$$(go tool -modfile=go.gopls.mod gopls check -severity=hint $$(git ls-files --cached --others --exclude-standard '*.go' ':!:benchmark/compare/*')) && \
 		if [ -n "$$out" ]; then echo "$$out"; exit 1; fi
 
 benchlog:

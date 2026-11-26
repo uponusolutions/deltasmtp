@@ -101,12 +101,11 @@ func (r *Resolver) Recipients(ctx context.Context, rcpts []string) (Result, erro
 	domainToServer := map[string]cache{}
 
 	for _, rcpt := range rcpts {
-		domainIndex := strings.LastIndex(rcpt, "@")
-		if domainIndex == -1 {
+		_, domain, found := strings.CutLast(rcpt, "@")
+		if !found {
 			res.addError(rcpt, fmt.Errorf("couldn't extract domain part of %s", rcpt))
 			continue
 		}
-		domain := rcpt[domainIndex+1:]
 
 		rcptToDomain[rcpt] = domain
 		c, ok := domainToServer[domain]
