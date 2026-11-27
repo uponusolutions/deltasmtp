@@ -44,20 +44,27 @@ type Session interface {
 	Logger(ctx context.Context) *slog.Logger
 
 	// Set return path for currently processed message.
+	// A *deltasmtp.StatusError with a negative reply rejects MAIL with that reply,
+	// any other error is logged and rejects it with 451 4.0.0.
 	Mail(ctx context.Context, from string, opts *deltasmtp.MailOptions) error
 
 	// Add recipient for currently processed message.
+	// A *deltasmtp.StatusError with a negative reply rejects RCPT with that reply,
+	// any other error is logged and rejects it with 451 4.0.0.
 	Rcpt(ctx context.Context, to string, opts *deltasmtp.RcptOptions) error
 
 	// Verify checks the validity of an email address on the server.
-	// If error is nil then smtp code 252 is send
-	// if error is smtp status then the smtp status is send
-	// else internal server error is returned and connection is closed
-	Verify(ctx context.Context, addr string, opts *deltasmtp.VrfyOptions) error
+	// The status is sent as reply, nil sends 252 2.5.0. A *deltasmtp.StatusError with
+	// a negative reply is sent as reply, any other error closes the connection.
+	Verify(ctx context.Context, addr string, opts *deltasmtp.VrfyOptions) (*deltasmtp.Status, error)
 
 	// Set currently processed message contents and send it.
 	// If r is called then the data must be consumed completely before returning.
 	// The queuedid must not be unique.
+	// A *deltasmtp.StatusError with a negative reply rejects the message with that
+	// reply, any other error closes the connection. With BDAT the reader returns
+	// deltasmtp.ErrBDATReset or deltasmtp.ErrBDATQuit if the client sends RSET or
+	// QUIT instead of the next chunk, the session should return it.
 	Data(ctx context.Context, r func() io.Reader) (queueid string, err error)
 
 	// AuthMechanisms returns valid auth mechanism.

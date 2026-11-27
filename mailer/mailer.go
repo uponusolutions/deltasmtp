@@ -177,7 +177,7 @@ var errRenew = errors.New("smtp: transaction limit of the connection reached")
 // limit isn't learned, the 421 may have another reason.
 func (c *Mailer) mailError(err error) error {
 	// Not errors.As, it would allocate st for every MAIL.
-	if st, ok := errors.AsType[*deltasmtp.Status](err); ok && st.Code == 421 && c.transactions > 1 {
+	if st, ok := errors.AsType[*deltasmtp.StatusError](err); ok && st.Code == 421 && c.transactions > 1 {
 		return errRenew
 	}
 	return err

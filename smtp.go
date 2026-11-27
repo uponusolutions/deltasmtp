@@ -3,6 +3,15 @@ package deltasmtp
 
 import "time"
 
+var (
+	// Crnl \r\n
+	Crnl = []byte{'\r', '\n'}
+	// Dotcrnl .\r\n
+	Dotcrnl = []byte{'.', '\r', '\n'}
+	// Crlfdot \r\n.
+	Crlfdot = []byte{'\r', '\n', '.'}
+)
+
 // BodyType describes the type of the body.
 type BodyType string
 

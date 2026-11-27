@@ -98,9 +98,9 @@ func (d *Bdat) Read(b []byte) (int, error) {
 				return 0, io.EOF
 			}
 		case "RSET":
-			return 0, deltasmtp.Reset
+			return 0, deltasmtp.ErrBDATReset
 		case "QUIT":
-			return 0, deltasmtp.Quit
+			return 0, deltasmtp.ErrBDATQuit
 		default:
 			return 0, deltasmtp.ErrBDATExpected
 		}

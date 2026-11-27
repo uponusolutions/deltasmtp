@@ -57,8 +57,8 @@ func (s *Session) Mail(_ context.Context, from string, _ *deltasmtp.MailOptions)
 	return nil
 }
 
-func (*Session) Verify(_ context.Context, _ string, _ *deltasmtp.VrfyOptions) error {
-	return nil
+func (*Session) Verify(_ context.Context, _ string, _ *deltasmtp.VrfyOptions) (*deltasmtp.Status, error) {
+	return nil, nil
 }
 
 func (s *Session) Rcpt(_ context.Context, to string, _ *deltasmtp.RcptOptions) error {

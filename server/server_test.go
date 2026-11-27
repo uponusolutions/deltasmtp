@@ -61,6 +61,10 @@ type backend struct {
 	// How long Rcpt takes.
 	rcptDelay time.Duration
 
+	// Returned by Verify.
+	verifyStatus *deltasmtp.Status
+	verifyErr    error
+
 	// Errors passed to Session.Close.
 	closeErrors chan error
 }
@@ -118,8 +122,8 @@ func (*session) STARTTLS(_ context.Context, tls *tls.Config) (*tls.Config, error
 	return tls, nil
 }
 
-func (*session) Verify(_ context.Context, _ string, _ *deltasmtp.VrfyOptions) error {
-	return nil
+func (s *session) Verify(_ context.Context, _ string, _ *deltasmtp.VrfyOptions) (*deltasmtp.Status, error) {
+	return s.backend.verifyStatus, s.backend.verifyErr
 }
 
 func (s *session) Mail(ctx context.Context, from string, opts *deltasmtp.MailOptions) error {
@@ -976,7 +980,7 @@ func TestServer_Chunking_Reset(t *testing.T) {
 
 	// Client changed its mind... Note, in this case Data method error is discarded and not returned to the cilent.
 	expect(t, c, scanner, "RSET", "250 ")
-	require.ErrorIs(t, <-be.dataErrors, deltasmtp.Reset)
+	require.ErrorIs(t, <-be.dataErrors, deltasmtp.ErrBDATReset)
 
 	send(t, c, scanner, "MAIL FROM: root@nsa.gov")
 	send(t, c, scanner, "RCPT TO:<root@gchq.gov.uk>")
@@ -992,7 +996,7 @@ func TestServer_Chunking_Reset(t *testing.T) {
 // a failed BDAT transfer must not end the next one after its first chunk, a
 // DATA rejected before the 354 reply must not suppress it for the next one.
 func TestServer_MessagesInOneSession(t *testing.T) {
-	failed := deltasmtp.NewStatusS(555, deltasmtp.EnhancedCode{5, 0, 0}, "I failed")
+	failed := deltasmtp.NewStatusS(555, deltasmtp.EnhancedCode{5, 0, 0}, "I failed").Err()
 	be := &backend{dataErrQueue: []error{failed, nil, failed, nil, nil, nil}}
 	be, s, c, scanner := testServerAuthenticated(t, be, server.WithEnableCHUNKING(true))
 	defer func() {
@@ -1063,7 +1067,7 @@ func TestServer_Chunking_Close(t *testing.T) {
 
 	// Client changed its mind... Note, in this case Data method error is discarded and not returned to the cilent.
 	expect(t, c, scanner, "QUIT", "221 ")
-	require.ErrorIs(t, <-be.dataErrors, deltasmtp.Quit)
+	require.ErrorIs(t, <-be.dataErrors, deltasmtp.ErrBDATQuit)
 }
 
 func TestServer_Chunking_ClosedInTheMiddle(t *testing.T) {
@@ -1093,7 +1097,7 @@ func TestServer_Chunking_EarlyError(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	be.dataErr = deltasmtp.NewStatusS(555, deltasmtp.EnhancedCode{5, 0, 0}, "I failed")
+	be.dataErr = deltasmtp.NewStatusS(555, deltasmtp.EnhancedCode{5, 0, 0}, "I failed").Err()
 
 	expect(t, c, scanner, "MAIL FROM:<root@nsa.gov>", "250 ")
 	expect(t, c, scanner, "RCPT TO:<root@gchq.gov.uk>", "250 ")
@@ -1110,7 +1114,7 @@ func TestServer_Chunking_EarlyErrorDuringChunk(t *testing.T) {
 		_ = c.Close()
 	}()
 
-	be.dataErr = deltasmtp.NewStatusS(555, deltasmtp.EnhancedCode{5, 0, 0}, "I failed")
+	be.dataErr = deltasmtp.NewStatusS(555, deltasmtp.EnhancedCode{5, 0, 0}, "I failed").Err()
 
 	expect(t, c, scanner, "MAIL FROM:<root@nsa.gov>", "250 ")
 	expect(t, c, scanner, "RCPT TO:<root@gchq.gov.uk>", "250 ")
@@ -1672,7 +1676,7 @@ func TestServer_DataTimeoutClearedAfterTransfer(t *testing.T) {
 // TestServer_MultiDigitEnhancedCode checks that a backend's enhanced code with a
 // multi-digit detail (RFC 3463, e.g. Gmail's 5.7.26) goes out unchanged on every line.
 func TestServer_MultiDigitEnhancedCode(t *testing.T) {
-	rejected := deltasmtp.NewStatusM(550, deltasmtp.EnhancedCode{5, 7, 26}, []string{"DMARC", "policy"})
+	rejected := deltasmtp.NewStatusM(550, deltasmtp.EnhancedCode{5, 7, 26}, []string{"DMARC", "policy"}).Err()
 	_, c, scanner := limitTestServer(t, &backend{rejectAfterOpen: rejected}, 0)
 
 	expect(t, c, scanner, "DATA", "354 ")

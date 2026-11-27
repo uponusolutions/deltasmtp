@@ -114,7 +114,7 @@ func (t *Receiver) ReadResponseValid(expectCode int) error {
 	}
 
 	if unexpected {
-		return status
+		return status.Err()
 	}
 
 	return nil

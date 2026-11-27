@@ -138,7 +138,7 @@ func TestBasic_smtp(t *testing.T) {
 	require.NoError(t, c.greet())
 	require.NoError(t, c.Hello())
 
-	var smtpErr *deltasmtp.Status
+	var smtpErr *deltasmtp.StatusError
 	require.ErrorAs(t, c.Mail("whatever", nil), &smtpErr)
 	require.Equal(t, 500, smtpErr.Code)
 	require.Equal(t, deltasmtp.EnhancedCode{5, 0, 0}, smtpErr.EnhancedCode)
@@ -423,7 +423,7 @@ func TestHello_421Response(t *testing.T) {
 
 	c.cfg.localName = "customhost"
 
-	var status *deltasmtp.Status
+	var status *deltasmtp.StatusError
 	require.ErrorAs(t, c.Hello(), &status)
 	require.Equal(t, 421, status.Code)
 	require.Equal(t, "Service not available, closing transmission channel", status.Lines[0])
@@ -973,7 +973,7 @@ func TestClientProtocolErrorCloses(t *testing.T) {
 	t.Run("status reply keeps the connection", func(t *testing.T) {
 		c := connect(t, "250 localhost\r\n550 5.1.1 unknown\r\n250 2.1.5 OK\r\n")
 
-		var status *deltasmtp.Status
+		var status *deltasmtp.StatusError
 		require.ErrorAs(t, c.Rcpt("a@example.com", nil), &status)
 		require.True(t, c.Connected())
 		require.NoError(t, c.Rcpt("b@example.com", nil))

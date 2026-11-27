@@ -15,7 +15,7 @@ in a single call.
 - **Modern ESMTP:** PIPELINING and CHUNKING/BDAT on both sides, SMTPUTF8, DSN,
   REQUIRETLS, DELIVERBY, MT-PRIORITY, RRVS and XOORG, see [extensions](#extensions).
 - **Context-aware** client, server and mailer, with structured
-  `*deltasmtp.Status` replies.
+  `*deltasmtp.Status` replies and `*deltasmtp.StatusError` rejections.
 
 ```sh
 go get github.com/uponusolutions/deltasmtp
@@ -194,10 +194,13 @@ if err := s.ListenAndServe(ctx); err != nil {
 }
 ```
 
-Errors returned from session methods are sent to the client. Return an
-`*deltasmtp.Status` to control the reply code, enhanced code and (multi-line) text;
+Errors returned from session methods are sent to the client. Return a
+`*deltasmtp.StatusError` with a negative (4xx or 5xx) reply to control the reply
+code, enhanced code and (multi-line) text, e.g.
+`deltasmtp.NewStatusS(550, deltasmtp.EnhancedCode{5, 1, 1}, "No such user").Err()`;
 any other error becomes a generic failure and is logged through the session
-logger.
+logger. `Session.Verify` returns a positive `*deltasmtp.Status` to answer VRFY,
+`nil` answers 252.
 
 `server.WithEnforceSecureConnection` rejects everything except NOOP, EHLO,
 STARTTLS and QUIT until the connection is encrypted, and
@@ -273,7 +276,7 @@ The API is not compatible with upstream. The notable changes:
   it possible to skip reading the body and to report an identifier back to the
   client.
 - **Structured errors and logging.** Replies are `*deltasmtp.Status` values with
-  multi-line support, and each session can provide its own `*slog.Logger`.
+  multi-line support, returned as `*deltasmtp.StatusError` when they reject, and each session can provide its own `*slog.Logger`.
 - **More extensions.** Client CHUNKING/BDAT and XOORG are supported in addition to what upstream offers.
 - **Pipelining on both sides**, enabled by default in the client.
 - **The mailer**, which resolves MX records, sends to several servers per call

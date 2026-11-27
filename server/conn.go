@@ -31,6 +31,10 @@ var errMessageTooLarge = errors.New("smtp: maximum message size exceeded")
 // the transactions per session, it can only continue in a new session.
 var errTooManyTransactions = errors.New("smtp: maximum transactions exceeded")
 
+// errQuit is returned by a handler if the client sent QUIT, the session ends
+// with the 221 reply.
+var errQuit = errors.New("smtp: client quit")
+
 type state int32
 
 const (
@@ -98,7 +102,9 @@ type transaction struct {
 	recipients int  // number of accepted recipients
 }
 
-// run loops until an error occurs (quit for example)
+// run loops until an error occurs (quit for example). A handler writes a
+// positive reply itself, a returned rejection (a negative *deltasmtp.StatusError)
+// is written as reply and the session goes on, any other error ends it.
 func (c *Conn) run() (err error) {
 	var (
 		cmd string
@@ -115,18 +121,10 @@ func (c *Conn) run() (err error) {
 
 		err = c.handle(cmd, arg)
 		if err != nil {
-			// if error is a smtp status it isn't necessary to close the connection
-			if smtpErr, ok := errors.AsType[*deltasmtp.Status](err); ok {
-				// Service closing transmission channel, after quit
-				if smtpErr.Code == 221 {
-					return smtpErr
-				}
-
+			// a rejection doesn't close the connection
+			if smtpErr, ok := rejection(err); ok {
 				// ToDo: close connection on repeated errors (e.g. authentication tries)
-
-				// fresh deadlines for the reply after a DATA or BDAT transfer
-				c.renewDeadline()
-				c.writeStatus(smtpErr)
+				_ = c.reply(smtpErr.Status())
 				continue
 			}
 
@@ -199,13 +197,13 @@ func (c *Conn) handleStateInit(cmd string, arg string) error {
 	case "HELO", "EHLO":
 		return c.handleGreet(cmd == "EHLO", arg)
 	case "NOOP":
-		return deltasmtp.Noop
+		return c.reply(deltasmtp.Noop)
 	case "VRFY":
 		return c.handleVrfy(arg)
 	case "RSET": // Reset session
 		return c.handleRSET()
 	case "QUIT":
-		return deltasmtp.Quit
+		return errQuit
 	default:
 		return c.commandUnknown(cmd)
 	}
@@ -216,13 +214,13 @@ func (c *Conn) handleStateEnforceAuthentication(cmd string, arg string) error {
 	case "HELO", "EHLO":
 		return c.handleGreet(cmd == "EHLO", arg)
 	case "NOOP":
-		return deltasmtp.Noop
+		return c.reply(deltasmtp.Noop)
 	case "VRFY":
 		return c.handleVrfy(arg)
 	case "RSET": // Reset session
 		return c.handleRSET()
 	case "QUIT":
-		return deltasmtp.Quit
+		return errQuit
 	case "AUTH":
 		// there is always a mechanism, as it is an enforce authentication precondition
 		return c.handleAuth(arg)
@@ -243,13 +241,13 @@ func (c *Conn) handleStateGreeted(cmd string, arg string) error {
 	case "MAIL":
 		return c.handleMail(arg)
 	case "NOOP":
-		return deltasmtp.Noop
+		return c.reply(deltasmtp.Noop)
 	case "VRFY":
 		return c.handleVrfy(arg)
 	case "RSET": // Reset session
 		return c.handleRSET()
 	case "QUIT":
-		return deltasmtp.Quit
+		return errQuit
 	case "AUTH":
 		if len(c.client.mechanisms) > 0 {
 			return c.handleAuth(arg)
@@ -272,7 +270,7 @@ func (c *Conn) handleStateMail(cmd string, arg string) error {
 	case "RCPT":
 		return c.handleRcpt(arg)
 	case "NOOP":
-		return deltasmtp.Noop
+		return c.reply(deltasmtp.Noop)
 	case "VRFY":
 		return c.handleVrfy(arg)
 	case "RSET": // Reset session
@@ -285,7 +283,7 @@ func (c *Conn) handleStateMail(cmd string, arg string) error {
 	case "DATA":
 		return c.handleData(arg)
 	case "QUIT":
-		return deltasmtp.Quit
+		return errQuit
 	case "STARTTLS":
 		return c.handleStartTLS()
 	default:
@@ -298,13 +296,13 @@ func (c *Conn) handleStateEnforceSecureConnection(cmd string, arg string) error 
 	case "HELO", "EHLO":
 		return c.handleGreet(cmd == "EHLO", arg)
 	case "NOOP":
-		return deltasmtp.Noop
+		return c.reply(deltasmtp.Noop)
 	case "VRFY":
 		return c.handleVrfy(arg)
 	case "STARTTLS":
 		return c.handleStartTLS()
 	case "QUIT":
-		return deltasmtp.Quit
+		return errQuit
 	// RFC 5321, always consume bdat data if capabilities were sent
 	case "BDAT":
 		return c.handleBdatDiscard(arg)
@@ -313,9 +311,9 @@ func (c *Conn) handleStateEnforceSecureConnection(cmd string, arg string) error 
 	}
 }
 
-func (c *Conn) commandUnknown(cmd string) *deltasmtp.Status {
+func (c *Conn) commandUnknown(cmd string) error {
 	return deltasmtp.NewStatusS(502, deltasmtp.EnhancedCode{5, 5, 1},
-		fmt.Sprintf("%s command unknown, state %d", cmd, c.state))
+		fmt.Sprintf("%s command unknown, state %d", cmd, c.state)).Err()
 }
 
 // Server returns the server this connection comes from.
@@ -393,8 +391,7 @@ func (c *Conn) handleRSET() error {
 	if err != nil {
 		return err
 	}
-	c.writeStatus(deltasmtp.Reset)
-	return nil
+	return c.reply(deltasmtp.Reset)
 }
 
 // GREET state -> waiting for HELO
@@ -431,7 +428,7 @@ func (c *Conn) handleGreet(esmtp bool, arg string) error {
 	}
 
 	if !esmtp {
-		return deltasmtp.NewStatusS(250, deltasmtp.NoEnhancedCode, c.server.hostname+" greets "+c.client.helo)
+		return c.reply(deltasmtp.NewStatusS(250, deltasmtp.NoEnhancedCode, c.server.hostname+" greets "+c.client.helo))
 	}
 
 	c.client.mechanisms = c.session.AuthMechanisms(c.ctx)
@@ -441,7 +438,7 @@ func (c *Conn) handleGreet(esmtp bool, arg string) error {
 		return c.newStatusError(deltasmtp.ErrNoAuthMechanism, err)
 	}
 
-	return c.handleGreetResponse()
+	return c.reply(c.handleGreetResponse())
 }
 
 func (c *Conn) handleGreetResponse() *deltasmtp.Status {
@@ -555,42 +552,36 @@ func (c *Conn) handleError(err error) {
 	}
 
 	if neterr, ok := errors.AsType[net.Error](err); ok && neterr.Timeout() {
-		c.writeStatus(deltasmtp.ErrIdleTimeout)
+		c.writeStatus(deltasmtp.ErrIdleTimeout.Status())
 		c.Close(fmt.Errorf("idle timeout: %w", err))
 		return
 	}
 
-	if smtpErr, ok := errors.AsType[*deltasmtp.Status](err); ok {
-		c.writeStatus(smtpErr)
-
-		if smtpErr.Code != 221 {
-			c.Close(fmt.Errorf("smtp error: %w", err))
-		} else {
-			c.Close(nil)
-		}
-
+	if errors.Is(err, errQuit) {
+		c.writeStatus(deltasmtp.Quit)
+		c.Close(nil)
 		return
 	}
 
 	if errors.Is(err, errTooManyTransactions) {
-		c.writeStatus(deltasmtp.ErrTooManyTransactions)
+		c.writeStatus(deltasmtp.ErrTooManyTransactions.Status())
 		c.Close(err)
 		return
 	}
 
 	if errors.Is(err, errMessageTooLarge) {
-		c.writeStatus(deltasmtp.ErrDataTooLarge)
+		c.writeStatus(deltasmtp.ErrDataTooLarge.Status())
 		c.Close(err)
 		return
 	}
 
 	if errors.Is(err, deltasmtp.ErrTooLongLine) {
-		c.writeStatus(deltasmtp.ErrCommandLineTooLong)
+		c.writeStatus(deltasmtp.ErrCommandLineTooLong.Status())
 		c.Close(errors.New("line too long"))
 		return
 	}
 
-	c.writeStatus(deltasmtp.ErrConnection)
+	c.writeStatus(deltasmtp.ErrConnection.Status())
 	c.Close(fmt.Errorf("unknown error: %w", err))
 }
 
@@ -746,13 +737,6 @@ func (c *Conn) handleMail(arg string) error {
 	c.tx.smtputf8 = opts.UTF8
 
 	if err := c.session.Mail(c.ctx, from, opts); err != nil {
-		if smtpErr, ok := errors.AsType[*deltasmtp.Status](err); ok {
-			// a positive response also counts as a success
-			if smtpErr.Positive() {
-				c.state = stateMail
-			}
-			return smtpErr
-		}
 		return c.newStatusError(deltasmtp.ErrMailNotAccepted, err)
 	}
 
@@ -779,9 +763,9 @@ func handleMailBY(server *Server, opts *deltasmtp.MailOptions, value string) err
 }
 
 // validateAddress calls the address validator of the server, if set.
-// If it returns an error that is not a negative *deltasmtp.Status, the reply is
+// If it returns an error that is not a negative *deltasmtp.StatusError, the reply is
 // rejected, a 553 (mailbox name not allowed, RFC 5321 section 4.2.2).
-func (c *Conn) validateAddress(addr string, rejected *deltasmtp.Status) error {
+func (c *Conn) validateAddress(addr string, rejected *deltasmtp.StatusError) error {
 	if c.server.addressValidator == nil {
 		return nil
 	}
@@ -789,11 +773,6 @@ func (c *Conn) validateAddress(addr string, rejected *deltasmtp.Status) error {
 	err := c.server.addressValidator(addr)
 	if err == nil {
 		return nil
-	}
-
-	if status, ok := errors.AsType[*deltasmtp.Status](err); ok && status.Positive() {
-		// A positive reply would end the command without a result.
-		err = errors.New("address validator returned a positive reply")
 	}
 
 	return c.newStatusError(rejected, err)
@@ -837,7 +816,7 @@ func (c *Conn) handleRcpt(arg string) error {
 	if c.server.maxRecipients > 0 && c.tx.recipients >= c.server.maxRecipients {
 		return deltasmtp.NewStatusS(452, deltasmtp.EnhancedCode{4, 5, 3},
 			fmt.Sprintf("Maximum limit of %v recipients reached", c.server.maxRecipients),
-		)
+		).Err()
 	}
 
 	var argsBuf [8]parse.Arg
@@ -868,13 +847,6 @@ func (c *Conn) handleRcpt(arg string) error {
 	}
 
 	if err := c.session.Rcpt(c.ctx, recipient, opts); err != nil {
-		if smtpErr, ok := errors.AsType[*deltasmtp.Status](err); ok {
-			// a positive response also counts as a success
-			if smtpErr.Positive() {
-				c.tx.recipients++
-			}
-			return smtpErr
-		}
 		return c.newStatusError(deltasmtp.ErrRcptNotAccepted, err)
 	}
 
@@ -954,13 +926,14 @@ func (c *Conn) handleVrfy(arg string) error {
 		return err
 	}
 
-	res := c.session.Verify(c.ctx, vrfy, opts)
-
-	if res == nil {
-		return deltasmtp.VRFY
+	status, err := c.session.Verify(c.ctx, vrfy, opts)
+	if err != nil {
+		return err
 	}
-
-	return res
+	if status == nil {
+		status = deltasmtp.VRFY
+	}
+	return c.reply(status)
 }
 
 func (c *Conn) handleAuth(arg string) error {
@@ -1037,7 +1010,7 @@ func (c *Conn) handleAuth(arg string) error {
 		c.state = stateGreeted
 	}
 
-	return deltasmtp.AuthSucceeded
+	return c.reply(deltasmtp.AuthSucceeded)
 }
 
 func (c *Conn) handleStartTLS() error {
@@ -1101,8 +1074,8 @@ func (c *Conn) handleData(arg string) error {
 
 	uuid, err := c.session.Data(c.ctx, c.data.open)
 
-	// an error which isn't a smtp status error will always terminate the connection
-	if _, ok := errors.AsType[*deltasmtp.Status](err); err != nil && !ok {
+	// an error which isn't a rejection will always terminate the connection
+	if _, ok := rejection(err); err != nil && !ok {
 		return err
 	}
 
@@ -1130,7 +1103,7 @@ func (c *Conn) handleData(arg string) error {
 	if err != nil {
 		return err
 	}
-	return c.accepted(uuid)
+	return c.reply(c.accepted(uuid))
 }
 
 // discardBdat discards a BDAT chunk that isn't processed. Like a processed
@@ -1191,14 +1164,16 @@ func (c *Conn) handleBdat(arg string) error {
 
 	queueid, err := c.session.Data(c.ctx, c.data.open)
 
-	smtpErr, isStatus := errors.AsType[*deltasmtp.Status](err)
-
-	// an error which isn't a SMTPStatus error will always terminate the connection
-	if err != nil && !isStatus {
-		return err
-	}
+	// RSET or QUIT instead of the next chunk, returned by the reader
+	reset := errors.Is(err, deltasmtp.ErrBDATReset)
+	quit := errors.Is(err, deltasmtp.ErrBDATQuit)
+	smtpErr, isRejection := rejection(err)
 
 	if err != nil {
+		// an error which isn't a rejection will always terminate the connection
+		if !isRejection && !reset && !quit {
+			return err
+		}
 		// read anything left to continue after this failure
 		// https://www.rfc-editor.org/rfc/rfc3030.html
 		// If a 5XX or 4XX code is received by the sender-SMTP in response to a BDAT
@@ -1218,16 +1193,21 @@ func (c *Conn) handleBdat(arg string) error {
 		return errMessageTooLarge
 	}
 
-	if err != nil {
+	switch {
+	case quit: // the session ends, Session.Close follows
+		return errQuit
+	case reset:
+		_ = c.reply(deltasmtp.Reset)
+	case err != nil:
 		// write down error after data is discarded to prevent deadlock because of pipelining
-		c.writeStatus(smtpErr)
-		return c.reset()
+		c.writeStatus(smtpErr.Status())
+	default:
+		if err = c.reset(); err != nil {
+			return err
+		}
+		return c.reply(c.accepted(queueid))
 	}
-
-	if err = c.reset(); err != nil {
-		return err
-	}
-	return c.accepted(queueid)
+	return c.reset()
 }
 
 // bindMessageFuncs binds the funcs of c.data on the first message, they serve
@@ -1284,6 +1264,14 @@ func (c *Conn) greet() {
 	c.writeStatus(c.server.greeting)
 }
 
+// reply writes the positive reply to a command with a fresh deadline, e.g.
+// after a DATA or BDAT transfer, and returns nil.
+func (c *Conn) reply(status *deltasmtp.Status) error {
+	c.renewDeadline()
+	c.writeStatus(status)
+	return nil
+}
+
 func (c *Conn) writeStatus(status *deltasmtp.Status) {
 	c.logger().LogAttrs(c.ctx, slog.LevelDebug, "write status", slog.Any("status", status))
 
@@ -1295,7 +1283,7 @@ func (c *Conn) writeStatus(status *deltasmtp.Status) {
 // text. Unlike writeStatus it needs neither a Status nor the joined text, the
 // replies to MAIL and RCPT, which name the address, don't allocate.
 func (c *Conn) writeOK(text ...string) {
-	// Like a status returned to run, the reply gets a fresh deadline after
+	// Like reply, the reply gets a fresh deadline after
 	// the session handled the command.
 	c.renewDeadline()
 
@@ -1330,13 +1318,21 @@ func (c *Conn) flushReply(err error) {
 	}
 }
 
-// newStatusError returns err if it is a status, otherwise it logs err and returns status.
-func (c *Conn) newStatusError(status *deltasmtp.Status, err error) *deltasmtp.Status {
-	if smtpErr, ok := errors.AsType[*deltasmtp.Status](err); ok {
+// newStatusError returns err if it is a rejection, otherwise it logs err and returns status.
+func (c *Conn) newStatusError(status *deltasmtp.StatusError, err error) *deltasmtp.StatusError {
+	if smtpErr, ok := rejection(err); ok {
 		return smtpErr
 	}
-	c.logger().ErrorContext(c.ctx, status.Text(), slog.Any("err", err))
+	c.logger().ErrorContext(c.ctx, status.Status().Text(), slog.Any("err", err))
 	return status
+}
+
+// rejection returns err as reply if it is a *deltasmtp.StatusError with a negative
+// reply. A positive one returned as error isn't a rejection, it is handled like
+// any other error.
+func rejection(err error) (*deltasmtp.StatusError, bool) {
+	smtpErr, ok := errors.AsType[*deltasmtp.StatusError](err)
+	return smtpErr, ok && smtpErr.Code >= 400
 }
 
 // renewDeadline renews the deadline to at least now plus the command timeout,

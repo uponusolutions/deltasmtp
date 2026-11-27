@@ -47,7 +47,7 @@ func (t *transaction) send(from string, opts client.MailOptions, rcptsOptions []
 
 	if err = msg.writeTo(w.Writer()); err != nil {
 		// Partly sent, the connection can't be reused. A rejected BDAT chunk would leave it
-		// in sync, but can't be told apart from a *deltasmtp.Status returned by a reader.
+		// in sync, but can't be told apart from a *deltasmtp.StatusError returned by a reader.
 		return nil, errors.Join(err, c.client.Close())
 	}
 
@@ -196,7 +196,7 @@ func (t *transaction) contentResponse(size int) (*client.ContentCloser, error) {
 // tooManyRcpts reports whether err rejects a RCPT for too many recipients: 452 (RFC 5321
 // section 4.5.3.1.10) with X.5.3 or no enhanced code, or 552 with X.5.3, treated as 452.
 func tooManyRcpts(err error) bool {
-	st, ok := errors.AsType[*deltasmtp.Status](err)
+	st, ok := errors.AsType[*deltasmtp.StatusError](err)
 	if !ok {
 		return false
 	}
@@ -237,7 +237,7 @@ func (c *Mailer) resetOrClose() error {
 // isRejection reports whether err rejects a command and leaves the connection in sync:
 // a server reply other than 421 or a refusal of the client.
 func isRejection(err error) bool {
-	if st, ok := errors.AsType[*deltasmtp.Status](err); ok {
+	if st, ok := errors.AsType[*deltasmtp.StatusError](err); ok {
 		return st.Code != 421
 	}
 	return errors.Is(err, client.ErrRefused)

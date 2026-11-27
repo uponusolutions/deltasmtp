@@ -61,7 +61,7 @@ func (v *Verifier) Active() bool {
 }
 
 // Verify returns nil if the server accepts addr as recipient. A rejection is a
-// *deltasmtp.Status, a refusal of the client matches client.ErrRefused. A failing
+// *deltasmtp.StatusError, a refusal of the client matches client.ErrRefused. A failing
 // connect or MAIL, or with VerifyVrfy a server not supporting VRFY (500, 502, 504), ends
 // the Verifier. With VerifyRcpt these replies reject the address, RCPT is mandatory.
 // SMTPUTF8 is used if the server supports it.
@@ -107,7 +107,7 @@ func (v *Verifier) verify(ctx context.Context, addr string) error {
 // Not used for RCPT: it is mandatory, there these replies reject the address (e.g. its
 // syntax), and ending the Verifier would leave the transaction open.
 func unsupported(err error) bool {
-	st, ok := errors.AsType[*deltasmtp.Status](err)
+	st, ok := errors.AsType[*deltasmtp.StatusError](err)
 	return ok && (st.Code == 500 || st.Code == 502 || st.Code == 504)
 }
 

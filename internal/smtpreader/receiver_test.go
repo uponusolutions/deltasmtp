@@ -149,10 +149,10 @@ func TestReadMultiLine(t *testing.T) {
 
 	err := r.ReadResponseValid(250)
 	require.Error(t, err)
-	status, ok := errors.AsType[*deltasmtp.Status](err)
+	status, ok := errors.AsType[*deltasmtp.StatusError](err)
 	require.True(t, ok)
 
-	require.Equal(t, expectedText, status.Text())
+	require.Equal(t, expectedText, status.Status().Text())
 	require.Equal(t, "550 5.1.1 "+expectedText, status.Error())
 }
 
@@ -166,7 +166,7 @@ func TestReadMultiLineMultiDigitEnhancedCode(t *testing.T) {
 		"250 2.0.0 OK\r\n", &bytes.Buffer{})
 
 	err := r.ReadResponseValid(250)
-	var status *deltasmtp.Status
+	var status *deltasmtp.StatusError
 	require.ErrorAs(t, err, &status)
 	require.Equal(t, 550, status.Code)
 	require.Equal(t, deltasmtp.EnhancedCode{5, 7, 26}, status.EnhancedCode)
@@ -250,7 +250,7 @@ func TestReadResponseValidInvalid(t *testing.T) {
 	require.ErrorContains(t, err, "short response")
 
 	err = reader("251 2.1.5 OK\r\n", &bytes.Buffer{}).ReadResponseValid(250)
-	var status *deltasmtp.Status
+	var status *deltasmtp.StatusError
 	require.ErrorAs(t, err, &status)
 	require.Equal(t, 251, status.Code)
 	require.Equal(t, deltasmtp.EnhancedCode{2, 1, 5}, status.EnhancedCode)

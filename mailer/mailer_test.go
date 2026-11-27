@@ -34,7 +34,7 @@ var backend = testserver.Backend{
 	Mails: sync.Map{},
 	Rcpt: func(_ context.Context, to string, _ *deltasmtp.RcptOptions) error {
 		if strings.HasPrefix(to, "notfound") {
-			return deltasmtp.NewStatusS(550, deltasmtp.NoEnhancedCode, "not found "+to)
+			return deltasmtp.NewStatusS(550, deltasmtp.NoEnhancedCode, "not found "+to).Err()
 		}
 		return nil
 	},
@@ -441,7 +441,7 @@ func TestClient_SendMailAllRejectedKeepsPerRcptFailures(t *testing.T) {
 				err, ok := byRcpt[rcpt]
 				require.True(t, ok, "no failure reported for %s", rcpt)
 
-				var status *deltasmtp.Status
+				var status *deltasmtp.StatusError
 				require.ErrorAs(t, err, &status)
 				assert.Equal(t, 550, status.Code,
 					"%s must carry its own rejection, not the DATA rejection", rcpt)

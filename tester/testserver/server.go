@@ -125,8 +125,8 @@ func (Session) Logger(_ context.Context) *slog.Logger {
 }
 
 // Verify implements the Verify interface.
-func (Session) Verify(_ context.Context, _ string, _ *deltasmtp.VrfyOptions) error {
-	return nil
+func (Session) Verify(_ context.Context, _ string, _ *deltasmtp.VrfyOptions) (*deltasmtp.Status, error) {
+	return nil, nil
 }
 
 // Mail implements the Mail interface.

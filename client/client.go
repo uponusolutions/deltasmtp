@@ -264,7 +264,7 @@ func (c *Client) Close() (err error) {
 
 // receiveResponse reads a reply.
 //
-// Any error other than an *deltasmtp.Status reply (e.g. a malformed or too long reply,
+// Any error other than a *deltasmtp.StatusError reply (e.g. a malformed or too long reply,
 // a timeout) may leave the rest of the reply unread. The next command would read
 // it as its own reply, so the connection is closed. So it is after a 421 reply, the
 // server closes the connection (RFC 5321 section 3.8).
@@ -282,12 +282,12 @@ func (c *Client) receiveResponseValid(expectCode int) error {
 	if !smtpreader.IsCodeUnexpected(421, expectCode) { // the fast path wouldn't tell a 421
 		status, err := c.receiveResponse()
 		if err == nil && smtpreader.IsCodeUnexpected(status.Code, expectCode) {
-			return status
+			return status.Err()
 		}
 		return err
 	}
 	err := c.receiver.ReadResponseValid(expectCode)
-	if st, ok := errors.AsType[*deltasmtp.Status](err); err != nil && (!ok || st.Code == 421) {
+	if st, ok := errors.AsType[*deltasmtp.StatusError](err); err != nil && (!ok || st.Code == 421) {
 		_ = c.Close()
 	}
 	return err
@@ -307,7 +307,7 @@ func (c *Client) greet() error {
 	// status unexpected or no message received
 	if status.Code != 220 || len(status.Lines) == 0 {
 		_ = c.Close()
-		return status
+		return status.Err()
 	}
 
 	if idx := strings.IndexRune(status.Lines[0], ' '); idx >= 0 {
@@ -330,7 +330,7 @@ func (c *Client) Hello() error {
 
 	err := c.ehlo()
 
-	if status, ok := errors.AsType[*deltasmtp.Status](err); ok && (status.Code == 500 || status.Code == 502) {
+	if status, ok := errors.AsType[*deltasmtp.StatusError](err); ok && (status.Code == 500 || status.Code == 502) {
 		// The server doesn't support EHLO, fallback to HELO
 		err = c.helo()
 	}
@@ -398,7 +398,7 @@ func (c *Client) cmd(expectCode int, message string) (*deltasmtp.Status, error) 
 	}
 
 	if smtpreader.IsCodeUnexpected(status.Code, expectCode) {
-		return nil, status
+		return nil, status.Err()
 	}
 
 	return status, nil
@@ -559,7 +559,7 @@ func (c *Client) ClearResponses(x int) error {
 			return err
 		}
 		if status.Code == 421 {
-			return status
+			return status.Err()
 		}
 	}
 	return nil
@@ -646,7 +646,7 @@ func (c *Client) ChunkingActive() bool {
 // many servers answer every VRFY with it for security reasons.
 // A non-nil return does not necessarily indicate an invalid address.
 //
-// If server returns an error, it will be of type *deltasmtp.Status.
+// A rejection of the server is a *deltasmtp.StatusError.
 func (c *Client) Verify(addr string, opts *VrfyOptions) error {
 	if err := validateLine(addr); err != nil {
 		return err
@@ -745,7 +745,7 @@ func (c *Client) Auth(saslClient sasl.Client) error {
 		default:
 			// status like 501 mean authentication aborted,
 			// but essentially everything except 335 and 235 can be interpreted as such.
-			return status
+			return status.Err()
 		}
 	}
 }

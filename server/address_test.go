@@ -65,9 +65,9 @@ func TestServer_AddressValidator(t *testing.T) {
 		case strings.HasPrefix(addr, "bad"):
 			return errors.New("bad address")
 		case strings.HasPrefix(addr, "custom"):
-			return deltasmtp.NewStatusS(550, deltasmtp.EnhancedCode{5, 7, 1}, "Not for you")
+			return deltasmtp.NewStatusS(550, deltasmtp.EnhancedCode{5, 7, 1}, "Not for you").Err()
 		case strings.HasPrefix(addr, "positive"):
-			return deltasmtp.NewStatusS(250, deltasmtp.EnhancedCode{2, 0, 0}, "Fine")
+			return deltasmtp.NewStatusS(250, deltasmtp.EnhancedCode{2, 0, 0}, "Fine").Err()
 		}
 		return nil
 	}

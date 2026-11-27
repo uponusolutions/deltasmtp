@@ -78,7 +78,7 @@ func TestSendRcptMaxFailsRemaining(t *testing.T) {
 
 	res, err := m.Send(t.Context(), "alice@internal.com", []string{"a@x.org", "b@x.org", "c@x.org"},
 		"Subject: a\r\n\r\nbody\r\n")
-	var status *deltasmtp.Status
+	var status *deltasmtp.StatusError
 	require.ErrorAs(t, err, &status)
 	assert.Equal(t, 421, status.Code)
 
@@ -145,7 +145,7 @@ func TestSendTooManyRecipientsAcceptedAfter(t *testing.T) {
 			}
 			be.Rcpt = func(_ context.Context, to string, _ *deltasmtp.RcptOptions) error {
 				if to == "c@x.org" && mails.Load() == 1 {
-					return deltasmtp.NewStatusS(452, deltasmtp.EnhancedCode{4, 5, 3}, "Error: too many recipients")
+					return deltasmtp.NewStatusS(452, deltasmtp.EnhancedCode{4, 5, 3}, "Error: too many recipients").Err()
 				}
 				if to == "d@x.org" {
 					delivered.Add(1)
@@ -203,12 +203,12 @@ func TestTooManyRcpts(t *testing.T) {
 		err  error
 		want bool
 	}{
-		{deltasmtp.NewStatusS(452, deltasmtp.EnhancedCode{4, 5, 3}, "Error: too many recipients"), true},
-		{deltasmtp.NewStatusS(452, deltasmtp.NoEnhancedCode, "Too many recipients"), true},
-		{deltasmtp.NewStatusS(552, deltasmtp.EnhancedCode{5, 5, 3}, "Too many recipients"), true},
-		{deltasmtp.NewStatusS(452, deltasmtp.EnhancedCode{4, 2, 2}, "Mailbox full"), false},
-		{deltasmtp.NewStatusS(552, deltasmtp.NoEnhancedCode, "Too much mail data"), false},
-		{deltasmtp.NewStatusS(550, deltasmtp.EnhancedCode{5, 1, 1}, "Unknown user"), false},
+		{deltasmtp.NewStatusS(452, deltasmtp.EnhancedCode{4, 5, 3}, "Error: too many recipients").Err(), true},
+		{deltasmtp.NewStatusS(452, deltasmtp.NoEnhancedCode, "Too many recipients").Err(), true},
+		{deltasmtp.NewStatusS(552, deltasmtp.EnhancedCode{5, 5, 3}, "Too many recipients").Err(), true},
+		{deltasmtp.NewStatusS(452, deltasmtp.EnhancedCode{4, 2, 2}, "Mailbox full").Err(), false},
+		{deltasmtp.NewStatusS(552, deltasmtp.NoEnhancedCode, "Too much mail data").Err(), false},
+		{deltasmtp.NewStatusS(550, deltasmtp.EnhancedCode{5, 1, 1}, "Unknown user").Err(), false},
 		{client.ErrRefused, false},
 	} {
 		assert.Equal(t, tc.want, tooManyRcpts(tc.err), tc.err.Error())
@@ -234,7 +234,7 @@ func postfixBackend(mails, rcpts *atomic.Int32) *testserver.Backend {
 			return err
 		}
 		if accepted.Load() >= 2 {
-			return deltasmtp.NewStatusS(452, deltasmtp.EnhancedCode{4, 5, 3}, "Error: too many recipients")
+			return deltasmtp.NewStatusS(452, deltasmtp.EnhancedCode{4, 5, 3}, "Error: too many recipients").Err()
 		}
 		accepted.Add(1)
 		return nil

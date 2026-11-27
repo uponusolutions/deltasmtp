@@ -98,7 +98,7 @@ func TestServerLimit_Data_BackendSwallowsError(t *testing.T) {
 func TestServerLimit_Data_BackendRejectsWithoutReading(t *testing.T) {
 	// The backend rejects the message without reading it, the server discards
 	// the rest itself and hits the limit while doing so.
-	rejected := deltasmtp.NewStatusS(554, deltasmtp.EnhancedCode{5, 6, 0}, "rejected")
+	rejected := deltasmtp.NewStatusS(554, deltasmtp.EnhancedCode{5, 6, 0}, "rejected").Err()
 	be, c, scanner := limitTestServer(t, &backend{rejectAfterOpen: rejected}, 50)
 
 	expect(t, c, scanner, "DATA", "354 ")
@@ -110,7 +110,7 @@ func TestServerLimit_Data_BackendRejectsWithoutReading(t *testing.T) {
 
 func TestServerLimit_Data_BackendRejectsWithinLimit(t *testing.T) {
 	// Rejecting a message within the limit keeps the connection usable.
-	rejected := deltasmtp.NewStatusS(554, deltasmtp.EnhancedCode{5, 6, 0}, "rejected")
+	rejected := deltasmtp.NewStatusS(554, deltasmtp.EnhancedCode{5, 6, 0}, "rejected").Err()
 	_, c, scanner := limitTestServer(t, &backend{rejectAfterOpen: rejected}, 50)
 
 	expect(t, c, scanner, "DATA", "354 ")
@@ -123,7 +123,7 @@ func TestServerLimit_Data_BackendRejectsWithinLimit(t *testing.T) {
 
 func TestServerLimit_Data_RejectedEndOfDataEndsTransaction(t *testing.T) {
 	// A message rejected after the end of data ends the transaction, like an accepted one.
-	rejected := deltasmtp.NewStatusS(554, deltasmtp.EnhancedCode{5, 6, 0}, "rejected")
+	rejected := deltasmtp.NewStatusS(554, deltasmtp.EnhancedCode{5, 6, 0}, "rejected").Err()
 	_, c, scanner := limitTestServer(t, &backend{rejectAfterOpen: rejected}, 50)
 
 	expect(t, c, scanner, "DATA", "354 ")
@@ -141,7 +141,7 @@ func TestServerLimit_Data_RejectedEndOfDataEndsTransaction(t *testing.T) {
 
 func TestServerLimit_Data_RejectedCommandKeepsTransaction(t *testing.T) {
 	// A DATA command rejected before 354 carried no message, the transaction stays open.
-	rejected := deltasmtp.NewStatusS(554, deltasmtp.EnhancedCode{5, 6, 0}, "rejected")
+	rejected := deltasmtp.NewStatusS(554, deltasmtp.EnhancedCode{5, 6, 0}, "rejected").Err()
 	_, c, scanner := limitTestServer(t, &backend{dataErr: rejected}, 50)
 
 	expect(t, c, scanner, "DATA", "554 5.6.0 ")
@@ -150,7 +150,7 @@ func TestServerLimit_Data_RejectedCommandKeepsTransaction(t *testing.T) {
 }
 
 func TestServerLimit_Bdat_BackendRejectsWithoutReading(t *testing.T) {
-	rejected := deltasmtp.NewStatusS(554, deltasmtp.EnhancedCode{5, 6, 0}, "rejected")
+	rejected := deltasmtp.NewStatusS(554, deltasmtp.EnhancedCode{5, 6, 0}, "rejected").Err()
 	be, c, scanner := limitTestServer(t, &backend{rejectAfterOpen: rejected}, 50)
 
 	payload := strings.Repeat("x", 60) + "\r\nNOOP\r\n"
@@ -160,7 +160,7 @@ func TestServerLimit_Bdat_BackendRejectsWithoutReading(t *testing.T) {
 }
 
 func TestServerLimit_Bdat_BackendRejectsWithinLimit(t *testing.T) {
-	rejected := deltasmtp.NewStatusS(554, deltasmtp.EnhancedCode{5, 6, 0}, "rejected")
+	rejected := deltasmtp.NewStatusS(554, deltasmtp.EnhancedCode{5, 6, 0}, "rejected").Err()
 	_, c, scanner := limitTestServer(t, &backend{rejectAfterOpen: rejected}, 50)
 
 	_, _ = io.WriteString(c, "BDAT 6 LAST\r\nNOOP\r\n")

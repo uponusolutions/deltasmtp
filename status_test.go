@@ -3,6 +3,7 @@ package deltasmtp
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -67,4 +68,24 @@ func TestNewStatusS(t *testing.T) {
 
 	s.Lines = append(s.Lines, "more")
 	assert.Equal(t, []string{"OK", "more"}, s.Lines)
+}
+
+// Err returns the status as *StatusError without allocating, Status returns it back.
+func TestStatusErr(t *testing.T) {
+	s := NewStatusS(550, EnhancedCode{5, 1, 1}, "No such user")
+
+	var err error
+	allocs := testing.AllocsPerRun(100, func() {
+		err = s.Err()
+	})
+	assert.Zero(t, allocs)
+
+	smtpErr, ok := errors.AsType[*StatusError](err)
+	require.True(t, ok)
+	assert.Same(t, s, smtpErr.Status())
+	assert.Equal(t, 550, smtpErr.Code)
+	assert.Equal(t, "550 5.1.1 No such user", err.Error())
+
+	var nilStatus *Status
+	assert.NoError(t, nilStatus.Err())
 }

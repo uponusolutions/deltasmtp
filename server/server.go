@@ -99,7 +99,7 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 
 	defer func() {
 		if err := recover(); err != nil {
-			c.writeStatus(deltasmtp.ErrInternal)
+			c.writeStatus(deltasmtp.ErrInternal.Status())
 			stack := debug.Stack()
 			c.logger().ErrorContext(
 				c.ctx,
@@ -128,7 +128,7 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 
 	if exceeded || exceededPerIP {
 		// Overall limit first, the client isn't at fault for a busy server.
-		status := deltasmtp.ErrTooManyConnections
+		status := deltasmtp.ErrTooManyConnections.Status()
 		if !exceeded {
 			// Same reply as Postfix for smtpd_client_connection_count_limit.
 			status = deltasmtp.NewStatusS(421, deltasmtp.EnhancedCode{4, 7, 0},

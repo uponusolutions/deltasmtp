@@ -55,8 +55,8 @@ func (session) STARTTLS(_ context.Context, tls *tls.Config) (*tls.Config, error)
 	return tls, nil
 }
 
-func (session) Verify(_ context.Context, _ string, _ *deltasmtp.VrfyOptions) error {
-	return nil
+func (session) Verify(_ context.Context, _ string, _ *deltasmtp.VrfyOptions) (*deltasmtp.Status, error) {
+	return nil, nil
 }
 
 func (session) Mail(_ context.Context, _ string, _ *deltasmtp.MailOptions) error {
