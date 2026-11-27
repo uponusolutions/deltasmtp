@@ -840,6 +840,28 @@ func TestClientChunking(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, w.Close())
 		require.Nil(t, w.chunkingBuffer)
+
+		// the buffer may be in use elsewhere, writes must not reach it
+		_, err = io.WriteString(w, "def")
+		require.ErrorIs(t, err, ErrContentClosed)
+		_, err = io.WriteString(w.Writer(), "def")
+		require.ErrorIs(t, err, ErrContentClosed)
+	})
+
+	t.Run("the buffer is released when the connection is gone", func(t *testing.T) {
+		c, _ := fakeClient("250-localhost\r\n250 CHUNKING\r\n")
+		require.NoError(t, c.ehlo())
+
+		w, err := c.Bdat(0)
+		require.NoError(t, err)
+		_, err = io.WriteString(w, "abc")
+		require.NoError(t, err)
+		require.NoError(t, c.Close())
+
+		require.ErrorIs(t, w.Close(), ErrNotConnected)
+		require.Nil(t, w.chunkingBuffer)
+		_, err = io.WriteString(w.Writer(), "def")
+		require.ErrorIs(t, err, ErrContentClosed)
 	})
 
 	t.Run("zero buffer size disables buffering", func(t *testing.T) {

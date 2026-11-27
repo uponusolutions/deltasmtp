@@ -7,6 +7,7 @@ import (
 
 	"github.com/uponusolutions/deltasmtp"
 	"github.com/uponusolutions/deltasmtp/internal/deadline"
+	"github.com/uponusolutions/deltasmtp/internal/smtpwriter"
 )
 
 // ContentCloser writes the message content.
@@ -42,6 +43,9 @@ func (d *ContentCloser) Writer() io.Writer {
 
 // Write writes do underlying writer.
 func (d *ContentCloser) Write(p []byte) (n int, err error) {
+	if d.closed {
+		return 0, ErrContentClosed
+	}
 	if d.c.session.conn == nil {
 		return 0, ErrNotConnected
 	}
@@ -61,19 +65,15 @@ func (d *ContentCloser) CloseWithResponse() (*deltasmtp.Status, error) {
 	}
 	d.closed = true
 
+	// The writer is done with its buffer, even if closing failed or was skipped.
+	defer d.releaseChunkingBuffer()
+
 	// e.g. closed after a malformed reply to a BDAT chunk
 	if d.c.session.conn == nil {
 		return nil, ErrNotConnected
 	}
 
 	err := d.writer.Close()
-
-	// The writer is done with its buffer, even if closing failed.
-	if d.chunkingBuffer != nil {
-		chunkingBuffers.Put(d.chunkingBuffer)
-		d.chunkingBuffer = nil
-	}
-
 	if err != nil {
 		if _, ok := errors.AsType[*deltasmtp.Status](err); !ok {
 			_ = d.c.Close()
@@ -89,6 +89,19 @@ func (d *ContentCloser) CloseWithResponse() (*deltasmtp.Status, error) {
 	}
 
 	return status, err
+}
+
+// releaseChunkingBuffer returns the buffer of the writer to chunkingBuffers.
+// The writer is discarded first, it must not write into a buffer in use elsewhere,
+// e.g. through Writer() if the writer was never closed.
+func (d *ContentCloser) releaseChunkingBuffer() {
+	if d.chunkingBuffer != nil {
+		if w, ok := d.writer.(*smtpwriter.BdatBuffered); ok {
+			w.Discard()
+		}
+		chunkingBuffers.Put(d.chunkingBuffer)
+		d.chunkingBuffer = nil
+	}
 }
 
 // Close closes the data closer.

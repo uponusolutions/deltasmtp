@@ -2,8 +2,12 @@ package smtpwriter
 
 import (
 	"bufio"
+	"errors"
 	"io"
 )
+
+// ErrClosed is returned by a write to a closed BdatBuffered.
+var ErrClosed = errors.New("smtp: write to closed content writer")
 
 // NewBdatWriterBuffered returns a writer that can be used to write bdat commands to w.
 // The caller should close the BdatWriter before the next call to a method on w.
@@ -24,6 +28,8 @@ type BdatBuffered struct {
 	buffer   []byte
 	position int
 	writer   Bdat
+	// closed is set by Close and Discard, the buffer may be reused by then.
+	closed bool
 }
 
 // Reset sets d up to write a new message like NewBdatWriterBuffered, the buffer
@@ -37,6 +43,9 @@ func (d *BdatBuffered) Reset(writer *bufio.Writer, read func() error, size int, 
 // full buffer as bdat chunk. Like Write, a full buffer is only sent once more
 // data follows, so Close can send the last one as LAST.
 func (d *BdatBuffered) ReadFrom(r io.Reader) (n int64, err error) {
+	if d.closed {
+		return 0, ErrClosed
+	}
 	for {
 		if err = d.flushFull(); err != nil {
 			return n, err
@@ -56,6 +65,9 @@ func (d *BdatBuffered) ReadFrom(r io.Reader) (n int64, err error) {
 // Write buffers b, every full buffer is sent as bdat chunk.
 // Writes larger than the buffer are passed through if the buffer is empty.
 func (d *BdatBuffered) Write(b []byte) (n int, err error) {
+	if d.closed {
+		return 0, ErrClosed
+	}
 	var p int
 
 	for n < len(b) {
@@ -93,7 +105,14 @@ func (d *BdatBuffered) flushFull() error {
 }
 
 // Close sends the buffered rest of the message as the last chunk.
+// Afterwards, even if it failed, d no longer uses its buffer, so the buffer
+// can be reused. Every write returns ErrClosed until the next Reset.
 func (d *BdatBuffered) Close() error {
+	if d.closed {
+		return ErrClosed
+	}
+	defer d.Discard()
+
 	if d.position > 0 {
 		// force bdat last, if size is unknown
 		if !d.writer.knownSize {
@@ -107,4 +126,13 @@ func (d *BdatBuffered) Close() error {
 	}
 
 	return d.writer.Close()
+}
+
+// Discard drops the buffer without sending it, every write returns ErrClosed
+// until the next Reset. It is used if the message can't be finished, e.g. the connection
+// is gone, so the buffer can be reused.
+func (d *BdatBuffered) Discard() {
+	d.closed = true
+	d.buffer = nil
+	d.position = 0
 }

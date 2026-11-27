@@ -196,3 +196,55 @@ func TestBdatWriterReaderFromEOFWithData(t *testing.T) {
 
 	require.Equal(t, "BDAT 2 LAST\r\nab", buf.String())
 }
+
+// TestBdatWriterBufferedClosed checks that a closed or discarded writer doesn't
+// touch its buffer anymore, it may be reused.
+func TestBdatWriterBufferedClosed(t *testing.T) {
+	newWriter := func(buf *bytes.Buffer) *smtpwriter.BdatBuffered {
+		d := &smtpwriter.BdatBuffered{}
+		d.Reset(bufio.NewWriter(buf), func() error { return nil }, 0, make([]byte, 4))
+		return d
+	}
+	requireClosed := func(t *testing.T, d *smtpwriter.BdatBuffered) {
+		t.Helper()
+		_, err := d.Write([]byte("x"))
+		require.ErrorIs(t, err, smtpwriter.ErrClosed)
+		_, err = d.ReadFrom(bytes.NewReader([]byte("x")))
+		require.ErrorIs(t, err, smtpwriter.ErrClosed)
+		require.ErrorIs(t, d.Close(), smtpwriter.ErrClosed)
+	}
+
+	t.Run("close", func(t *testing.T) {
+		var buf bytes.Buffer
+		d := newWriter(&buf)
+		_, err := d.Write([]byte("ab"))
+		require.NoError(t, err)
+		require.NoError(t, d.Close())
+		requireClosed(t, d)
+		require.Equal(t, "BDAT 2 LAST\r\nab", buf.String())
+	})
+
+	t.Run("failed close", func(t *testing.T) {
+		d := &smtpwriter.BdatBuffered{}
+		d.Reset(bufio.NewWriterSize(errWriter{}, 16), func() error { return nil }, 0, make([]byte, 4))
+		_, err := d.Write([]byte("ab"))
+		require.NoError(t, err)
+		require.Error(t, d.Close())
+		requireClosed(t, d)
+	})
+
+	t.Run("discard", func(t *testing.T) {
+		var buf bytes.Buffer
+		d := newWriter(&buf)
+		_, err := d.Write([]byte("ab"))
+		require.NoError(t, err)
+		d.Discard()
+		requireClosed(t, d)
+		require.Empty(t, buf.String())
+	})
+}
+
+// errWriter fails every write.
+type errWriter struct{}
+
+func (errWriter) Write([]byte) (int, error) { return 0, errors.New("write failed") }

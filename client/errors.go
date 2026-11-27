@@ -1,6 +1,10 @@
 package client
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/uponusolutions/deltasmtp/internal/smtpwriter"
+)
 
 var (
 	// ErrNotConnected means there is no connection, e.g. it was closed after an error
@@ -21,6 +25,8 @@ var (
 	// or an extension the server doesn't support. Nothing was sent, the connection is unchanged.
 	// Check with errors.Is, the error text names the reason.
 	ErrRefused = errors.New("smtp: command refused by the client")
+	// ErrContentClosed means the content was written after it was closed.
+	ErrContentClosed = smtpwriter.ErrClosed
 )
 
 // refusedError is a refusal of the client, it matches ErrRefused.
