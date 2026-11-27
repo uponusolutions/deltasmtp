@@ -52,7 +52,7 @@ func (d *ContentCloser) Write(p []byte) (n int, err error) {
 	n, err = d.writer.Write(p)
 	// The message is only partly sent, the connection can't be used anymore.
 	// A rejected BDAT chunk (*deltasmtp.StatusError) leaves it in sync.
-	if _, ok := errors.AsType[*deltasmtp.StatusError](err); err != nil && !ok {
+	if err != nil && !deltasmtp.IsReply(err) {
 		_ = d.c.Close()
 	}
 	return n, err
@@ -75,7 +75,7 @@ func (d *ContentCloser) CloseWithResponse() (*deltasmtp.Status, error) {
 
 	err := d.writer.Close()
 	if err != nil {
-		if _, ok := errors.AsType[*deltasmtp.StatusError](err); !ok {
+		if !deltasmtp.IsReply(err) {
 			_ = d.c.Close()
 		}
 		return nil, err

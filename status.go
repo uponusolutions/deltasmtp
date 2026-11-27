@@ -1,6 +1,7 @@
 package deltasmtp
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -43,6 +44,14 @@ func (e *StatusError) Status() *Status {
 // Error returns the reply as formatted message.
 func (e *StatusError) Error() string {
 	return e.Status().String()
+}
+
+// IsReply reports whether err is, or wraps, a reply of the server (a *StatusError). Such an
+// error leaves the connection in sync, any other non-nil error (I/O, timeout, malformed
+// reply) doesn't. It is false for a nil err.
+func IsReply(err error) bool {
+	_, ok := errors.AsType[*StatusError](err)
+	return ok
 }
 
 // NoEnhancedCode is used to indicate that enhanced error code should not be

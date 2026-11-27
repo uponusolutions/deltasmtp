@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -88,4 +89,14 @@ func TestStatusErr(t *testing.T) {
 
 	var nilStatus *Status
 	assert.NoError(t, nilStatus.Err())
+}
+
+func TestIsReply(t *testing.T) {
+	st := &Status{Code: 550}
+	assert.False(t, IsReply(nil))
+	assert.False(t, IsReply(io.EOF))
+	assert.False(t, IsReply(errors.New("boom")))
+	assert.True(t, IsReply(st.Err()))
+	assert.True(t, IsReply(fmt.Errorf("wrapped: %w", st.Err())))
+	assert.True(t, IsReply(errors.Join(io.EOF, st.Err())))
 }
